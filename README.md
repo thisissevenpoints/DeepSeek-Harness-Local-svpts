@@ -6,7 +6,7 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 
 - 本项目使用 **Cherry Studio + DeepSeek API** 通过 **Vibe Coding** 方式完成；
 - 主要目的是**自用**（个人本地部署环境）；
-- 若需修改或提报漏洞，请**自行 fork 一份**，不直接在本仓库提交 issue/PR。
+- 基于上述原因，若想要修改或填补漏洞，**推荐自行分叉**，而不是直接在本仓库提报。
 
 ## 快速开始
 
