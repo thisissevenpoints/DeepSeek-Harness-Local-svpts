@@ -22,17 +22,17 @@
 ## 使用
 
 ```bat
-:: 日常推荐：双击 D:\alpha\DeepSeek-Harness-Local\启动DeepSeek-Harness.bat
-:: 停止：托盘右键"退出（停止后台服务）"，或双击 D:\alpha\DeepSeek-Harness-Local\停止DeepSeek-Harness.bat
+:: 日常推荐：双击 <项目根>\启动DeepSeek-Harness.bat
+:: 停止：托盘右键"退出（停止后台服务）"，或双击 <项目根>\停止DeepSeek-Harness.bat
 :: 手工方式（需后台已运行）
-cd /d D:\alpha\DeepSeek-Harness-Local\desktop
+cd /d <项目根>\desktop
 npm start
 ```
 
 首次需先安装依赖（下载 Electron 二进制，约 120MB）：
 
 ```bat
-cd /d D:\alpha\DeepSeek-Harness-Local\desktop
+cd /d <项目根>\desktop
 npm install
 ```
 
@@ -40,7 +40,7 @@ npm install
 
 ```bat
 set DSH_DESKTOP_SMOKE=1
-cd /d D:\alpha\DeepSeek-Harness-Local
+cd /d <项目根>
 启动DeepSeek-Harness.bat
 ```
 

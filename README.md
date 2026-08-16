@@ -2,6 +2,12 @@
 
 DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)（DeepSeek 开源 Agent 框架，MIT，developer preview）包装为 **常驻系统托盘的桌面应用**（看门狗 + 桌面壳合一），配一键启停脚本。
 
+## 项目声明
+
+- 本项目使用 **Cherry Studio + DeepSeek API** 通过 **Vibe Coding** 方式完成；
+- 主要目的是**自用**（个人本地部署环境）；
+- 若需修改或提报漏洞，请**自行 fork 一份**，不直接在本仓库提交 issue/PR。
+
 ## 快速开始
 
 ```bat

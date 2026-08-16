@@ -10,7 +10,7 @@
 在 Windows 11 Pro for Workstations（x86_64）上部署了 DeepSeek Harness（`dsh`，DeepSeek 开源 Agent 框架，MIT，当前处于 **developer preview**，破坏性变更随时可能发生），并为它制作了一个 Electron 桌面壳。全部资产位于：
 
 ```
-D:\alpha\DeepSeek-Harness-Local\
+<项目根>\
 ```
 
 **时间线**：
@@ -18,7 +18,7 @@ D:\alpha\DeepSeek-Harness-Local\
 | 阶段 | 内容 |
 |---|---|
 | 2026-08-16 上午 | 模式 B（源码安装）部署到 C 盘；完成 hello.txt 真实任务往返验收；拉取 qwen3:8b 作为本地默认模型 |
-| 2026-08-16 下午 | 应需求整体迁移至 D:\alpha\DeepSeek-Harness-Local\（含 `DSH_HOME` 用户环境变量设置）；迁移后全面整理测试（10 项全部通过） |
+| 2026-08-16 下午 | 应需求整体迁移至 <项目根>\（含 `DSH_HOME` 用户环境变量设置）；迁移后全面整理测试（10 项全部通过） |
 | 2026-08-16 晚间 | 制作 Electron 桌面壳（自拉起、自愈、退出清理），烟测通过并交付使用 |
 | 2026-08-16 深夜 | 接手后全量回归：headless 往返、Web 全流程、壳烟测（污染环境自愈验证）、会话管道核查、pnpm 版本机制澄清；修复壳启动脚本对 `ELECTRON_RUN_AS_NODE` 的自愈（`desktop\package.json`） |
 | 2026-08-16 深夜 | 按需改造为**看门狗架构**：新增 `desktop\watchdog.cjs`（后台唯一 owner、崩溃自动重启、停止信号），壳改纯客户端（关窗不停后台），新增 `停止DeepSeek-Harness.bat`，全链路实测通过 |
@@ -29,7 +29,7 @@ D:\alpha\DeepSeek-Harness-Local\
 ## 2. 目录结构与资产清单
 
 ```
-D:\alpha\DeepSeek-Harness-Local\
+<项目根>\
 │
 ├── HANDOVER.md                  # 本文档
 ├── 启动DeepSeek-Harness.bat      # 一键启动（托盘应用；双击；启动器窗口数秒后自动关闭不常驻；GBK+CRLF 编码约束见 §8-16）
@@ -84,8 +84,8 @@ D:\alpha\DeepSeek-Harness-Local\
 | 依赖 | 版本 | 位置/说明 |
 |---|---|---|
 | Windows | 11 Pro for Workstations 10.0.26200（x86_64） | Git Bash 为主要 shell |
-| Node.js | v22.23.2 | Cherry Studio mise shims 提供（`C:\Users\iamse\AppData\Roaming\CherryStudio\Toolchain\mise\shims`），满足仓库 `^22.19 \|\| >=24` 要求 |
-| pnpm | 11.7.0（仓库内自动采用） | 全局二进制（`C:\Users\iamse\AppData\Roaming\npm\pnpm`）在仓库外报 10.29.2；**进入仓库后按 `packageManager` 字段自动切换为 11.7.0**（2026-08-16 实测 `pnpm install` 输出 "using pnpm v11.7.0"，lockfile 零改动）。corepack 0.34.6 由 mise shims 提供 |
+| Node.js | v22.23.2 | Cherry Studio mise shims 提供（`C:\Users\<username>\AppData\Roaming\CherryStudio\Toolchain\mise\shims`），满足仓库 `^22.19 \|\| >=24` 要求 |
+| pnpm | 11.7.0（仓库内自动采用） | 全局二进制（`C:\Users\<username>\AppData\Roaming\npm\pnpm`）在仓库外报 10.29.2；**进入仓库后按 `packageManager` 字段自动切换为 11.7.0**（2026-08-16 实测 `pnpm install` 输出 "using pnpm v11.7.0"，lockfile 零改动）。corepack 0.34.6 由 mise shims 提供 |
 | git | 2.55.0 | — |
 | Ollama | 0.32.13 | 常驻服务，127.0.0.1:11434 |
 | Ollama 模型 | 约 17GB | **`C:\OllamaModels`**（用户环境变量 `OLLAMA_MODELS` 指向；用户明确选择不迁移）：qwen3:8b / qwen2.5:7b / qwen2.5:3b / gemma2:9b |
@@ -96,7 +96,7 @@ D:\alpha\DeepSeek-Harness-Local\
 
 | 变量 | 值 | 说明 |
 |---|---|---|
-| `DSH_HOME` | `D:\alpha\DeepSeek-Harness-Local\dsh-home` | dsh 的 Harness home；新开终端自动生效 |
+| `DSH_HOME` | `<项目根>\dsh-home` | dsh 的 Harness home；新开终端自动生效 |
 | `OLLAMA_MODELS` | `C:\OllamaModels` | 部署前已存在，未改动 |
 
 ## 4. 网络端点
@@ -211,7 +211,7 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 
 ```bat
 set DSH_DESKTOP_SMOKE=1
-cd /d D:\alpha\DeepSeek-Harness-Local
+cd /d <项目根>
 启动DeepSeek-Harness.bat
 ```
 
@@ -235,15 +235,15 @@ cd /d D:\alpha\DeepSeek-Harness-Local
 
 ```bat
 :: —— 启动 ——
-:: 方式零：双击 D:\alpha\DeepSeek-Harness-Local\启动DeepSeek-Harness.bat（推荐日常使用）
+:: 方式零：双击 <项目根>\启动DeepSeek-Harness.bat（推荐日常使用）
 ::   首次启动：托盘图标 + 窗口自动打开（loading 页即时反馈）；已在运行：约 2 秒唤起窗口
 :: 方式一：桌面壳（npm start；需后台已运行：托盘应用或手动方式二）
-cd /d D:\alpha\DeepSeek-Harness-Local\desktop && npm start
+cd /d <项目根>\desktop && npm start
 :: 方式二：纯 Web（前台常驻；Ctrl+C 停止；托盘应用在跑时会被当作外部实例监控）
-cd /d D:\alpha\DeepSeek-Harness-Local\deepseek-harness && pnpm dsh web
+cd /d <项目根>\deepseek-harness && pnpm dsh web
 
 :: —— 停止 ——
-:: 方式零：托盘右键"退出（停止后台服务）"，或双击 D:\alpha\DeepSeek-Harness-Local\停止DeepSeek-Harness.bat（优雅信号+端口兜底，幂等）
+:: 方式零：托盘右键"退出（停止后台服务）"，或双击 <项目根>\停止DeepSeek-Harness.bat（优雅信号+端口兜底，幂等）
 :: 手工兜底：
 netstat -ano | findstr :3080      :: 找到 LISTENING 的 PID
 taskkill /F /PID <pid>            :: 强制停止（Ctrl+C/SIGTERM 为优雅停止，5 秒排空）
@@ -251,12 +251,12 @@ taskkill /F /PID <pid>            :: 强制停止（Ctrl+C/SIGTERM 为优雅停�
 :: WS 就绪探测工具：node dsh-test\probe-ws.cjs（open 或 HTTP_426 视为就绪，同壳逻辑）
 
 :: —— 升级 ——
-cd /d D:\alpha\DeepSeek-Harness-Local\deepseek-harness
+cd /d <项目根>\deepseek-harness
 git pull && pnpm install && pnpm run build
 
 :: —— 验证 ——
 curl -sI http://127.0.0.1:3080                                :: 期望 200
-cd /d D:\alpha\DeepSeek-Harness-Local\desktop && set DSH_DESKTOP_SMOKE=1 && npm start   :: 全链路烟测
+cd /d <项目根>\desktop && set DSH_DESKTOP_SMOKE=1 && npm start   :: 全链路烟测
 
 :: —— 单次任务（headless，本地小模型需附加补丁）——
 :: 注意：源模式必须在仓库外 cwd 启动，并设置 TSX_TSCONFIG_PATH；
@@ -269,7 +269,7 @@ cd /d D:\alpha\DeepSeek-Harness-Local\desktop && set DSH_DESKTOP_SMOKE=1 && npm 
 TSX_LOADER=$(cd /d/alpha/DeepSeek-Harness-Local/deepseek-harness && node -p "require.resolve('tsx/esm')")
 TSX_URL="file:///$(cygpath -m "$TSX_LOADER")"
 cd <你的工作目录> && \
-DSH_HOME='D:\alpha\DeepSeek-Harness-Local\dsh-home' \
+DSH_HOME='<项目根>\dsh-home' \
 TSX_TSCONFIG_PATH="D:/alpha/DeepSeek-Harness-Local/deepseek-harness/tsconfig.json" \
 node --import "$TSX_URL" \
   "D:/alpha/DeepSeek-Harness-Local/deepseek-harness/apps/cli/src/bin.ts" \
@@ -308,11 +308,11 @@ node --import "$TSX_URL" \
 
 | 数据 | 位置 |
 |---|---|
-| 会话记录 | `D:\alpha\DeepSeek-Harness-Local\dsh-home\sessions\--<工作区路径编码>--\session-<uuid>\session.jsonl.zstd` |
+| 会话记录 | `<项目根>\dsh-home\sessions\--<工作区路径编码>--\session-<uuid>\session.jsonl.zstd` |
 | 壳日志 | `desktop\shell.log`、`desktop\watchdog.log`、`desktop\dsh-web.log` |
 | dsh 配置 | `dsh-home\settings.yaml`（热生效）、`dsh-home\.env`（启动加载） |
 | 凭证 | `dsh-home\.credentials.yaml`（UI 保存 Key 后生成；只写不回显） |
-| Ollama 日志 | `C:\Users\iamse\AppData\Local\Ollama\` |
+| Ollama 日志 | `C:\Users\<username>\AppData\Local\Ollama\` |
 | 烟测产物 | `desktop\smoke.png`、`desktop\smoke.txt` |
 
 ## 10. 安全规范（必须遵守）
