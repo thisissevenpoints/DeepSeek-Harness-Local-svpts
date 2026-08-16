@@ -1,0 +1,16 @@
+{
+  "name": "deepseek-harness-local-svpts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DeepSeek Harness Local svpts —— 本地部署套件：托盘应用（看门狗+桌面壳）、一键启停脚本、测试与交接文档",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "set \"ELECTRON_RUN_AS_NODE=\" && electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.0.0"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}

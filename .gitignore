@@ -1,0 +1,19 @@
+# —— 本地数据与隐私（绝不上传）——
+# dsh-home 含会话记录（sessions）、用户设置（settings.yaml）、凭证（.credentials.yaml）
+dsh-home/
+
+# —— 运行时产物 ——
+desktop/watchdog.log
+desktop/shell.log
+desktop/dsh-web.log
+desktop/watchdog.pid
+desktop/watchdog.stop
+desktop/smoke.*
+desktop/electron-userdata/
+desktop/node_modules/
+
+# —— 测试与临时 ——
+*.log
+*.tmp
+Thumbs.db
+.DS_Store

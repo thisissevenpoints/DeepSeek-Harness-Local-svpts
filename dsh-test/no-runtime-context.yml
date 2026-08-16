@@ -1,0 +1,7 @@
+# One-off acceptance overlay: drop the runtime-context snapshot user message,
+# which derails small local models. Applies only to runs that pass this file.
+- id: system-prompt
+  config:
+    includeRuntimeContext: false
+    persona: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
