@@ -37,6 +37,7 @@ const STOP_FILE = path.join(DIR, 'watchdog.stop')
 const WATCHDOG_LOG = path.join(DIR, 'watchdog.log')
 const SHELL_LOG = path.join(DIR, 'shell.log')
 const TRAY_ICON = path.join(DIR, 'tray.png')
+const APP_ICON = path.join(DIR, 'app.ico') // 窗口/任务栏图标（与托盘同源生成）
 const HEALTH_INTERVAL_MS = 5000
 const BOOT_TIMEOUT_MS = 180000 // 子进程存活但迟迟不监听的兜底上限（3 分钟）
 const MAX_CONSECUTIVE_FAILURES = 4
@@ -349,6 +350,7 @@ async function openShellWindow() {
     height: 900,
     title: 'DeepSeek Harness',
     autoHideMenuBar: true,
+    icon: APP_ICON,
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -437,6 +439,8 @@ function quitApp(stopBackend) {
 
 // ================= 主流程 =================
 function main() {
+  // 未打包应用设置 AUMID：任务栏图标正确跟随窗口 icon，分组与任务栏行为更稳定
+  app.setAppUserModelId('com.svpts.deepseek-harness-local')
   fs.writeFileSync(PID_FILE, String(process.pid))
   fs.rmSync(STOP_FILE, { force: true }) // 清掉可能残留的停止标记
   wlog(`tray app started (pid ${process.pid})${SMOKE ? ' (smoke)' : ''}${AUTOQUIT ? ' (autoquit)' : ''}`)
