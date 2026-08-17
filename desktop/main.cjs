@@ -230,58 +230,112 @@ async function waitFor(fn, timeoutMs) {
   return false
 }
 
-// —— UI 右上角"完全退出"按钮（壳注入，不改动 DSH 前端本体）——
-// 双通道通知壳：console.log 标记（一定送达 console-message 事件）+ 自定义协议导航
-// （will-navigate 拦截）。Chromium 可能拦截未知协议的导航导致单一通道失效，故双保险。
+// —— 自绘顶栏 + 功能按钮区（壳注入，不改动 DSH 前端本体）——
+// 无边框窗口（frame:false）需要自绘标题栏：顶栏即可拖拽区域 + 四按钮
+// （完全退出/最小化/最大化/关闭窗口，顺序自右向左），下方为预备功能按钮区。
+// 通知通道：console.log 标记（console-message 事件必然送达）+ 自定义协议导航兜底（去重）。
 const QUIT_PROTOCOL_URL = 'dsh-desktop://quit'
-const QUIT_CONSOLE_MARKER = 'DSH_DESKTOP_QUIT'
-const QUIT_BTN_INJECT = `(() => {
-  if (document.getElementById('dsh-desktop-quit')) return
-  const btn = document.createElement('button')
-  btn.id = 'dsh-desktop-quit'
-  btn.title = '完全退出（停止前端与后台）'
-  btn.textContent = '\\u23FB'
-  btn.style.cssText = 'position:fixed;top:8px;right:8px;z-index:2147483647;width:30px;height:30px;border:1px solid rgba(255,255,255,.25);border-radius:6px;background:rgba(17,24,39,.75);color:#e5e7eb;font-family:"Segoe UI Symbol",sans-serif;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s'
-  btn.onmouseenter = () => { btn.style.background = 'rgba(220,38,38,.85)' }
-  btn.onmouseleave = () => { btn.style.background = 'rgba(17,24,39,.75)' }
-  btn.onclick = () => {
-    console.log('${QUIT_CONSOLE_MARKER}')
-    try { location.href = '${QUIT_PROTOCOL_URL}' } catch (e) { /* 双通道之一失效时另一通道兜底 */ }
+const CONSOLE_MARKERS = {
+  QUIT: 'DSH_DESKTOP_QUIT',
+  MINIMIZE: 'DSH_DESKTOP_MINIMIZE',
+  MAXIMIZE: 'DSH_DESKTOP_MAXIMIZE',
+  CLOSE_WINDOW: 'DSH_DESKTOP_CLOSE_WINDOW',
+  OPEN_SESSIONS: 'DSH_DESKTOP_OPEN_SESSIONS',
+}
+const OVERLAY_INJECT = `(() => {
+  if (document.getElementById('dsh-desktop-overlay')) return
+  const style = document.createElement('style')
+  style.textContent = '#dsh-desktop-overlay{position:fixed;top:0;left:0;right:0;z-index:2147483647;font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;user-select:none}'
+  style.textContent += '#dsh-desktop-titlebar{display:flex;align-items:center;height:36px;background:rgba(17,24,39,.88);color:#e5e7eb;-webkit-app-region:drag;border-bottom:1px solid rgba(255,255,255,.08)}'
+  style.textContent += '#dsh-desktop-title{flex:1;padding-left:12px;font-size:12px;letter-spacing:.5px;opacity:.85;white-space:nowrap;overflow:hidden}'
+  style.textContent += '.dsh-dt-btn{width:38px;height:36px;border:none;background:transparent;color:#e5e7eb;font-size:14px;cursor:pointer;-webkit-app-region:no-drag;display:flex;align-items:center;justify-content:center;transition:background .15s}'
+  style.textContent += '.dsh-dt-btn:hover{background:rgba(255,255,255,.12)}'
+  style.textContent += '#dsh-desktop-quit:hover{background:rgba(220,38,38,.85)}'
+  style.textContent += '#dsh-desktop-toolbar{display:flex;align-items:center;gap:8px;padding:6px 12px;background:rgba(17,24,39,.72);border-bottom:1px solid rgba(255,255,255,.08)}'
+  style.textContent += '.dsh-tool-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid rgba(255,255,255,.22);border-radius:6px;background:rgba(255,255,255,.06);color:#e5e7eb;font-size:12px;cursor:pointer;transition:background .15s}'
+  style.textContent += '.dsh-tool-btn:hover{background:rgba(255,255,255,.16)}'
+  document.head.appendChild(style)
+  const overlay = document.createElement('div')
+  overlay.id = 'dsh-desktop-overlay'
+  const bar = document.createElement('div')
+  bar.id = 'dsh-desktop-titlebar'
+  const title = document.createElement('div')
+  title.id = 'dsh-desktop-title'
+  title.textContent = 'DeepSeek Harness'
+  const mkBtn = (id, titleText, glyph) => {
+    const b = document.createElement('button')
+    b.id = id
+    b.className = 'dsh-dt-btn'
+    b.title = titleText
+    b.textContent = glyph
+    b.onclick = () => console.log('DSH_DESKTOP_' + id.replace('dsh-desktop-', '').toUpperCase())
+    return b
   }
-  document.body.appendChild(btn)
+  bar.appendChild(title)
+  // 自右向左：完全退出 / 关闭窗口 / 最大化 / 最小化
+  bar.appendChild(mkBtn('dsh-desktop-quit', '完全退出（停止前端与后台）', '\\u23FB'))
+  bar.appendChild(mkBtn('dsh-desktop-close-window', '关闭窗口（回到托盘）', '\\u2715'))
+  bar.appendChild(mkBtn('dsh-desktop-maximize', '最大化 / 还原', '\\u2750'))
+  bar.appendChild(mkBtn('dsh-desktop-minimize', '最小化', '\\u2500'))
+  overlay.appendChild(bar)
+  // 预备功能按钮区
+  const toolbar = document.createElement('div')
+  toolbar.id = 'dsh-desktop-toolbar'
+  const sessBtn = document.createElement('button')
+  sessBtn.id = 'dsh-desktop-open-sessions'
+  sessBtn.className = 'dsh-tool-btn'
+  sessBtn.title = '打开对话存档文件夹（dsh-home\\sessions）'
+  sessBtn.innerHTML = '<span style="font-size:14px">\\uD83D\\uDCC1</span> 打开会话存档'
+  sessBtn.onclick = () => console.log('DSH_DESKTOP_OPEN_SESSIONS')
+  toolbar.appendChild(sessBtn)
+  overlay.appendChild(toolbar)
+  document.body.appendChild(overlay)
 })()`
 
-function injectQuitButton(w) {
+function injectOverlay(w) {
   if (!w || w.isDestroyed()) return
   const url = w.webContents.getURL()
   if (!url.startsWith('http')) return // loading/错误页（data:）不注入
-  w.webContents.executeJavaScript(QUIT_BTN_INJECT).catch(() => { /* 注入尽力而为 */ })
+  w.webContents.executeJavaScript(OVERLAY_INJECT).catch(() => { /* 注入尽力而为 */ })
 }
 
-let quitRequested = false
-async function requestQuitFromUi() {
-  if (quitRequested) return // 双通道可能同时触发，去重
-  quitRequested = true
-  if (process.env.DSH_DESKTOP_NOQUITCONFIRM !== '1') {
-    const { response } = await dialog.showMessageBox(
-      win && !win.isDestroyed() ? win : undefined,
-      {
-        type: 'warning',
-        buttons: ['完全退出', '取消'],
-        defaultId: 1,
-        cancelId: 1,
-        title: 'DeepSeek Harness',
-        message: '完全退出 DeepSeek Harness？',
-        detail: '将关闭窗口并停止后台服务（会话记录保留，下次启动可继续）。',
-      },
-    )
-    if (response !== 0) {
-      quitRequested = false // 用户取消，允许再次点击
-      return
-    }
-  }
+function requestQuitFromUi() {
   wlog('full quit requested from UI button')
   quitApp(true)
+}
+
+// 打开对话存档文件夹（dsh-home\sessions，不存在则创建）
+function openSessionsFolder() {
+  const dir = path.join(DSH_HOME_DIR, 'sessions')
+  try { fs.mkdirSync(dir, { recursive: true }) } catch { /* 忽略 */ }
+  const { shell } = require('electron')
+  shell.openPath(dir).then((err) => {
+    if (err) wlog(`openSessionsFolder failed: ${err}`)
+    else slog(`opened sessions folder: ${dir}`)
+  })
+}
+
+function dispatchUiMessage(marker) {
+  switch (marker) {
+    case CONSOLE_MARKERS.QUIT:
+      requestQuitFromUi()
+      break
+    case CONSOLE_MARKERS.MINIMIZE:
+      if (win && !win.isDestroyed()) win.minimize()
+      break
+    case CONSOLE_MARKERS.MAXIMIZE:
+      if (win && !win.isDestroyed()) {
+        if (win.isMaximized()) win.unmaximize()
+        else win.maximize()
+      }
+      break
+    case CONSOLE_MARKERS.CLOSE_WINDOW:
+      if (win && !win.isDestroyed()) win.close() // 关窗回托盘
+      break
+    case CONSOLE_MARKERS.OPEN_SESSIONS:
+      openSessionsFolder()
+      break
+  }
 }
 
 async function pageBootFailed(w) {
@@ -349,23 +403,26 @@ async function openShellWindow() {
     width: 1400,
     height: 900,
     title: 'DeepSeek Harness',
-    autoHideMenuBar: true,
+    frame: false, // 无边框：自绘顶栏（拖拽 + 完全退出/最小化/最大化/关闭窗口）
     icon: APP_ICON,
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('console-message', (_e, level, message) => {
-    if (typeof message === 'string' && message.trim() === QUIT_CONSOLE_MARKER) {
-      requestQuitFromUi()
-      return
+    if (typeof message === 'string') {
+      const marker = message.trim()
+      if (Object.values(CONSOLE_MARKERS).includes(marker)) {
+        dispatchUiMessage(marker)
+        return
+      }
     }
     slog(`console[${level}]: ${message}`)
   })
   win.webContents.on('did-fail-load', (_e, code, desc, url) => {
     slog(`did-fail-load: ${code} ${desc} ${url}`)
   })
-  // UI 右上角完全退出按钮：每次页面加载完成后注入（重载循环后同样生效）
-  win.webContents.on('did-finish-load', () => injectQuitButton(win))
+  // 自绘顶栏 + 功能按钮区：每次页面加载完成后注入（重载循环后同样生效）
+  win.webContents.on('did-finish-load', () => injectOverlay(win))
   win.webContents.on('will-navigate', (e, url) => {
     if (url.startsWith(QUIT_PROTOCOL_URL)) {
       e.preventDefault()
@@ -389,13 +446,26 @@ async function openShellWindow() {
     await win.webContents.executeJavaScript(`document.getElementById('dsh-desktop-quit')?.click()`)
     return
   }
+  if (process.env.DSH_DESKTOP_AUTOCLICKOPEN === '1') {
+    await new Promise(r => setTimeout(r, 3000))
+    slog('autoclickopen (test hook): clicking open-sessions button')
+    await win.webContents.executeJavaScript(`document.getElementById('dsh-desktop-open-sessions')?.click()`)
+    await new Promise(r => setTimeout(r, 3000))
+    slog('autoclickopen done, quitting')
+    quitting = true
+    app.quit()
+  }
   if (SMOKE) {
     await new Promise(r => setTimeout(r, 4000))
     const img = await win.webContents.capturePage()
     fs.writeFileSync(path.join(DIR, 'smoke.png'), img.toPNG())
     const diag = await win.webContents.executeJavaScript(`(async () => {
       const out = { title: document.title, url: location.href, ua: navigator.userAgent.slice(0, 80) }
-      out.quitBtn = !!document.getElementById('dsh-desktop-quit')
+      out.overlay = !!document.getElementById('dsh-desktop-overlay')
+      out.titlebarBtns = ['quit', 'minimize', 'maximize', 'close-window']
+        .map((n) => 'dsh-desktop-' + n)
+        .filter((id) => !!document.getElementById(id)).length
+      out.openSessionsBtn = !!document.getElementById('dsh-desktop-open-sessions')
       out.bodyText = document.body ? document.body.innerText.slice(0, 300) : '(no body)'
       try {
         const r = await fetch('/api/events.mux', { headers: { Upgrade: 'websocket' } })

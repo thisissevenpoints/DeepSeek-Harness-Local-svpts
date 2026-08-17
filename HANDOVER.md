@@ -178,13 +178,16 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 - 右键菜单：`打开 DeepSeek Harness` / `退出（停止后台服务）`（显式退出，杀后台+退出托盘）；
 - 关闭应用窗口：只销毁窗口、应用驻留托盘，后台继续运行。
 
-### UI 右上角"完全退出"按钮（壳注入，不改 DSH 本体）
+### 自绘顶栏 + 功能按钮区（壳注入，不改 DSH 本体；2026-08-17 定版）
 
-真实 UI 加载后（`did-finish-load`）由壳注入一个固定于右上角的 ⏻ 按钮（不修改 `apps/web` 源码，升级 dsh 不受影响）：
+**窗口为无边框（`frame: false`）**，由壳注入自绘标题栏与功能区（不修改 `apps/web` 源码，升级 dsh 不受影响）：
 
-1. 点击 → **双通道**通知壳：页面 `console.log('DSH_DESKTOP_QUIT')` 标记（`console-message` 事件必然送达，主通道）+ 自定义协议导航 `dsh-desktop://quit`（`will-navigate` 拦截，兜底通道；Chromium 可能拦截未知协议导航导致单通道失效，故双保险、带去重）；
-2. 弹出确认框（默认"取消"，防误触；取消后可再次点击）；确认后 `quitApp(true)`：停后台 + 退出托盘；
-3. 页面每次加载（含自动重载循环）后自动重新注入；loading/错误页（data:）不注入；
+- **顶栏**（高 36px，半透明深色，整条可拖拽移动窗口）：
+  - 左侧应用名"DeepSeek Harness"；
+  - 右侧按钮**自右向左**：`⏻ 完全退出`（确认框后停前后端）、`✕ 关闭窗口`（回托盘）、`⛶ 最大化/还原`、`─ 最小化`；
+- **功能按钮区**（顶栏下方一行，预备扩展）：第一个按钮 `📁 打开会话存档` —— 打开 `dsh-home\sessions` 文件夹（不存在则自动创建）。
+- 通知机制：**console 标记分派**（页面 `console.log('DSH_DESKTOP_*')` → 壳 `console-message` 必然送达，主通道）+ 自定义协议导航兜底（仅退出按钮保留双通道、带去重）。
+- 页面每次加载（含自动重载循环）后自动重新注入；loading/错误页（data:）不注入；
 4. 冒烟诊断含 `quitBtn` 字段（注入成功与否）。
 
 ### 看门狗逻辑（内嵌于 main.cjs）
@@ -226,7 +229,7 @@ cd /d <项目根>
 
 ### 测试钩子（环境变量）
 
-`DSH_DESKTOP_SMOKE=1`（烟测）、`DSH_DESKTOP_AUTOQUIT=1`（加载后仅退出不停后台）、`DSH_DESKTOP_CLOSEWIN=1`（加载后关窗留托盘）、`DSH_DESKTOP_AUTOCLICKQUIT=1`（加载后自动点击退出按钮，配合 `DSH_DESKTOP_NOQUITCONFIRM=1` 跳过确认框做全链路验证）、`DSH_DESKTOP_USERDATA=<路径>`（并行测试实例独立锁，不打扰运行中的会话）。
+`DSH_DESKTOP_SMOKE=1`（烟测，诊断含 overlay/titlebarBtns/openSessionsBtn 字段）、`DSH_DESKTOP_AUTOQUIT=1`（加载后仅退出不停后台）、`DSH_DESKTOP_CLOSEWIN=1`（加载后关窗留托盘）、`DSH_DESKTOP_AUTOCLICKQUIT=1`（自动点击退出按钮，配合 `DSH_DESKTOP_NOQUITCONFIRM=1` 跳过确认框）、`DSH_DESKTOP_AUTOCLICKOPEN=1`（自动点击"打开会话存档"按钮验证打开文件夹链路）、`DSH_DESKTOP_USERDATA=<路径>`（并行测试实例独立锁，不打扰运行中的会话）。
 
 ### 已知限制（MVP）
 
