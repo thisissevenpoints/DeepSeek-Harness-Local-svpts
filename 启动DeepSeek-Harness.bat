@@ -43,9 +43,9 @@ if not exist "%ROOT%desktop\main.cjs" (
 )
 
 rem 3) 端口占用提示：已有服务时直接复用，不会误杀
-%SystemRoot%\System32\netstat.exe -ano | %SystemRoot%\System32\findstr.exe ":3080" | %SystemRoot%\System32\findstr.exe /C:"LISTENING" >nul 2>nul
+%SystemRoot%\System32\netstat.exe -ano | %SystemRoot%\System32\findstr.exe ":3180" | %SystemRoot%\System32\findstr.exe /C:"LISTENING" >nul 2>nul
 if not errorlevel 1 (
-    echo [提示] 检测到 3080 端口已有 dsh 服务在运行，将直接复用。
+    echo [提示] 检测到 3180 端口已有 dsh 服务在运行，将直接复用。
 )
 
 rem 4) 拉起托盘应用（脱离本窗口；已在运行则唤起其窗口），随后本窗口自动关闭

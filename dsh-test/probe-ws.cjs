@@ -3,7 +3,7 @@
 const { createRequire } = require('node:module')
 const req = createRequire('D:/alpha/DeepSeek-Harness-Local/desktop/package.json')
 const WebSocket = req('ws')
-const ws = new WebSocket('ws://127.0.0.1:3080/api/events.mux')
+const ws = new WebSocket('ws://127.0.0.1:3180/api/events.mux')
 const t = setTimeout(() => { console.log('RESULT=TIMEOUT'); process.exit(3) }, 10000)
 ws.on('open', () => { clearTimeout(t); console.log('RESULT=OPEN'); process.exit(0) })
 ws.on('unexpected-response', (_r, res) => { clearTimeout(t); console.log('RESULT=HTTP_' + res.statusCode); process.exit(res.statusCode === 426 ? 0 : 1) })

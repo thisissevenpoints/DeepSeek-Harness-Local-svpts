@@ -23,6 +23,7 @@
 | 2026-08-16 深夜 | 接手后全量回归：headless 往返、Web 全流程、壳烟测（污染环境自愈验证）、会话管道核查、pnpm 版本机制澄清；修复壳启动脚本对 `ELECTRON_RUN_AS_NODE` 的自愈（`desktop\package.json`） |
 | 2026-08-16 深夜 | 按需改造为**看门狗架构**：新增 `desktop\watchdog.cjs`（后台唯一 owner、崩溃自动重启、停止信号），壳改纯客户端（关窗不停后台），新增 `停止DeepSeek-Harness.bat`，全链路实测通过 |
 | 2026-08-16 深夜 | 修复启动脚本并定版**托盘应用**：看门狗与壳合并为单一常驻托盘 Electron 应用（右键菜单退出/启动壳、second-instance 唤起、loading 页即时反馈）；修复 Electron 空环境变量 node 模式陷阱、window-all-closed 托盘消失、退出竞态等 4 个缺陷 |
+| 2026-08-17 | 升级 dsh 至 **v0.1.0-rc.7**（47f943859b→99f6f02fec，111 提交）；因 Windows 动态端口保留段（2993-3092）覆盖原 3080 导致 EACCES，**端口整体迁移 3080→3180**（`--port 3180` 参数 + 全链路改造），烟测通过 |
 
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
@@ -103,9 +104,9 @@
 
 | 端点 | 用途 |
 |---|---|
-| `http://127.0.0.1:3080` | dsh Web UI（仅监听本机；官方暂不支持 --host 0.0.0.0） |
-| `http://127.0.0.1:3080/api/*` | 宿主 API 前缀（浏览器端 RPC 上行） |
-| `ws://127.0.0.1:3080/api/events.mux` | 浏览器端 WebSocket 下行（就绪判据：握手成功或 HTTP 426） |
+| `http://127.0.0.1:3180` | dsh Web UI（仅监听本机；官方暂不支持 --host 0.0.0.0） |
+| `http://127.0.0.1:3180/api/*` | 宿主 API 前缀（浏览器端 RPC 上行） |
+| `ws://127.0.0.1:3180/api/events.mux` | 浏览器端 WebSocket 下行（就绪判据：握手成功或 HTTP 426） |
 | `http://127.0.0.1:11434/v1` | Ollama OpenAI 兼容端点（settings.yaml 中 `ollama-local` provider） |
 
 ## 5. 配置详解（dsh-home）
@@ -188,24 +189,24 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 
 ### 看门狗逻辑（内嵌于 main.cjs）
 
-1. 3080 无服务：`cmd /c pnpm dsh web` 拉起（cwd=仓库根，注入 `DSH_HOME`）；
+1. 3180 无服务：`cmd /c pnpm dsh web` 拉起（cwd=仓库根，注入 `DSH_HOME`）；
 2. 健康巡检每 5 秒；**任何 HTTP 响应（含启动期 404）即视为存活**；
 3. **宕机判定以子进程存活为准**（无固定宽限时间）：进程活着就视为"启动中/运行中"绝不误杀（dsh 冷启动随负载波动 10-30 秒）；进程死亡且端口不通才重启；进程存活但 3 分钟不监听视为卡死强制重启；
 4. 崩溃自动重启；连续 4 次真正不可达进入"放弃重启但持续监测"状态（后台恢复后自动复位，不再永久死锁）；
-5. 清理双保险：taskkill 进程树 + 按 3080 监听 PID 兜底（防 tree-kill 漏杀孙进程占端口）；
-6. 3080 已有外部实例：仅监控不接管也不杀；外部实例退出后自动拉起自己的实例；
+5. 清理双保险：taskkill 进程树 + 按 3180 监听 PID 兜底（防 tree-kill 漏杀孙进程占端口）；
+6. 3180 已有外部实例：仅监控不接管也不杀；外部实例退出后自动拉起自己的实例；
 7. 停止信号：`watchdog.stop` 文件出现 → 置 quitting 标志（杜绝退出竞态）→ 清理自己拉起的实例 → 退出；`watchdog.pid` 写本进程 pid（停止脚本兜底用）；
 8. 单实例锁：`userData` 隔离到 `desktop\electron-userdata`（避免与其它未打包 Electron 应用共用锁），second-instance 唤起窗口。
 
 ### 窗口加载逻辑
 
-1. 窗口先显示 loading 页（即时反馈）→ 等待 3080 就绪（最长 90 秒，超时显示内嵌错误页含排查指引）；
+1. 窗口先显示 loading 页（即时反馈）→ 等待 3180 就绪（最长 90 秒，超时显示内嵌错误页含排查指引）；
 2. `ws` 包握手探测 `/api/events.mux`（open 或 426 均视为就绪）；
 3. 加载真实 UI；检测到页面 "Failed to load plugins" 时自动等待并重载（最多 7 次，总时限约 2 分钟）。
 
 ### 停止
 
-方式一：托盘右键"退出（停止后台服务）"；方式二：双击 `停止DeepSeek-Harness.bat`（写停止标记走优雅路径 + 3080 监听 PID 兜底清理，幂等）。
+方式一：托盘右键"退出（停止后台服务）"；方式二：双击 `停止DeepSeek-Harness.bat`（写停止标记走优雅路径 + 3180 监听 PID 兜底清理，幂等）。
 
 ### 烟测（无人值守验证）
 
@@ -245,7 +246,7 @@ cd /d <项目根>\deepseek-harness && pnpm dsh web
 :: —— 停止 ——
 :: 方式零：托盘右键"退出（停止后台服务）"，或双击 <项目根>\停止DeepSeek-Harness.bat（优雅信号+端口兜底，幂等）
 :: 手工兜底：
-netstat -ano | findstr :3080      :: 找到 LISTENING 的 PID
+netstat -ano | findstr :3180      :: 找到 LISTENING 的 PID
 taskkill /F /PID <pid>            :: 强制停止（Ctrl+C/SIGTERM 为优雅停止，5 秒排空）
 :: 注意：taskkill 不带 /F 对 node 控制台进程无效（报"只能强制终止"）；脚本化场景一律 /F + 干净重启
 :: WS 就绪探测工具：node dsh-test\probe-ws.cjs（open 或 HTTP_426 视为就绪，同壳逻辑）
@@ -255,7 +256,7 @@ cd /d <项目根>\deepseek-harness
 git pull && pnpm install && pnpm run build
 
 :: —— 验证 ——
-curl -sI http://127.0.0.1:3080                                :: 期望 200
+curl -sI http://127.0.0.1:3180                                :: 期望 200
 cd /d <项目根>\desktop && set DSH_DESKTOP_SMOKE=1 && npm start   :: 全链路烟测
 
 :: —— 单次任务（headless，本地小模型需附加补丁）——
@@ -287,8 +288,8 @@ node --import "$TSX_URL" \
 3. **模型能力**：gemma2:9b（旧版）不支持 tools API（Ollama 400）；qwen2.5:7b 工具调用不稳定。均不建议做 agent 模型。
 4. **pnpm 仓库跨盘 mv 会失败/极慢**：workspace 大量包级符号链接无法跨盘重建。正确迁移姿势：删 node_modules → 全新 clone（或 robocopy /MT:16）→ 新位置 `pnpm install && pnpm run build`。
 5. **会话日志为 zstd 多帧容器**：`node:zlib` 的 `zstdDecompressSync` 只解第一帧；需按 magic `28 B5 2F FD`（0x28B52FFD）扫描逐帧解码。
-6. **Windows 保留端口段（如 3999）会 EACCES**：临时服务器用 `listen(0)` 动态端口。
-7. **MSYS 的 TaskStop/普通 kill 杀不掉 node/mv 子进程**：按 PID 找进程树（`netstat -ano | findstr :3080`）→ `taskkill //F //PID`（Git Bash 双斜杠）。
+6. **Windows 保留端口段会 EACCES**：`netsh interface ipv4 show excludedportrange protocol=tcp` 查看保留段；2026-08-17 实测 **2993-3092 段覆盖原 3080**（系统动态预留，重启/服务变化会改变），dsh 用 `--port 3180` 迁移解决。临时服务器用 `listen(0)` 动态端口。
+7. **MSYS 的 TaskStop/普通 kill 杀不掉 node/mv 子进程**：按 PID 找进程树（`netstat -ano | findstr :3180`）→ `taskkill //F //PID`（Git Bash 双斜杠）。
 8. **本机会话环境设置了 `ELECTRON_RUN_AS_NODE=1`**（来自 CherryStudio 进程环境继承，非注册表/非 .bashrc）：跑任何 Electron 应用前必须 `unset ELECTRON_RUN_AS_NODE`（或在 cmd 里 `set ELECTRON_RUN_AS_NODE=`），否则 Electron 以纯 Node 运行（`require('electron')` 返回 exe 路径字符串，`app` 为 undefined）。**桌面壳的 `npm start` 已内置自愈（2026-08-16 修复，见 §6-2b），污染环境下可正常启动**；`DSH_HOME` 在 CherryStudio 启动前设置，其派生 shell 可能看不到——重启 CherryStudio 或手动 `export` 即可。
 9. **Electron 37 API 变更**：`BrowserWindow.setWindowOpenHandler` 已移除 → 用 `win.webContents.setWindowOpenHandler`。
 10. **主进程 undici fetch 带 `Upgrade: websocket` 头探测 WS 不稳定**（挂起甚至静默崩溃、留僵尸进程）→ 用 `ws` 包握手探测（open 或 unexpected-response 426 均视为就绪）。
@@ -300,7 +301,7 @@ node --import "$TSX_URL" \
 16. **启动 bat 必须保持 GBK+CRLF 编码**：中文 Windows 的 cmd 以 GBK 解析批处理，UTF-8 编码会导致含中文的 `if (...)` 块解析错位（行尾被吞、行碎片被当命令执行），`chcp 65001` 也救不了块内中文。**任何编辑（含 AI 工具的增量编辑）后都必须重新转换**：`iconv -f UTF-8 -t CP936` + `unix2dos`，改完用 `iconv -f CP936 -t UTF-8` 回读验证无乱码再交付；切勿直接存成 UTF-8。
 17. **bat 内的外部命令一律写 System32 绝对路径**（`%SystemRoot%\System32\where.exe` 等）：从 Git Bash 等 MSYS 环境调用时，PATH 里的 GNU 工具（where、timeout 等）会劫持同名命令导致参数不兼容。倒计时用 `%SystemRoot%\System32\PING.EXE -n 4 127.0.0.1 >nul`（约 3 秒），不要用 `timeout`（stdin 被重定向时直接报错退出）。
 18. **dsh web 冷启动时长随负载波动（实测 10-30 秒）**：健康检查**禁止用固定宽限期**——早期版本用 20 秒宽限，机器慢时依然把启动中的实例误杀成"杀了又起"循环（症状：watchdog.log 反复 `backend unreachable ... restarting`，`[ELIFECYCLE] Command failed with exit code 1` 是被 taskkill 的正常痕迹）。定版方案：**以子进程存活为判据**（进程活着就不杀；死了且端口不通才重启；3 分钟不监听才判卡死），且"任何 HTTP 响应（含 404）即存活"。
-19. **进程树清理双保险**：taskkill `/T` 可能漏杀脱离进程树的孙进程（实际监听 3080 的 dsh 节点），必须再按 `netstat` 监听 PID 兜底一次；停止脚本的"清理残留实例"行即使已清理也可能出现（netstat 行滞后，无害）。mise shim 启动的 node 进程会显示两个（shim 包装 + 真实进程），属正常。
+19. **进程树清理双保险**：taskkill `/T` 可能漏杀脱离进程树的孙进程（实际监听 3180 的 dsh 节点），必须再按 `netstat` 监听 PID 兜底一次；停止脚本的"清理残留实例"行即使已清理也可能出现（netstat 行滞后，无害）。mise shim 启动的 node 进程会显示两个（shim 包装 + 真实进程），属正常。
 20. **Electron 的 ELECTRON_RUN_AS_NODE 陷阱**：值为 `1` **或空字符串**都会进入纯 Node 模式（`app` 为 undefined）！cmd 的 `set "VAR="` 传给子进程时行为不稳定（有时剥除、有时传空串），启动脚本必须用 PowerShell `$env:VAR = $null` **彻底删除**该变量（$null 保证子进程环境无此变量）；MSYS bash 的 `VAR= cmd` 会原样传空串，测试时注意。另外 **必须订阅 `window-all-closed`**，否则 Electron 默认关窗即退出、托盘消失。
 21. **退出竞态防护**：应用退出路径（停止信号/托盘菜单/烟测）必须先置 `quitting` 标志再杀后台，否则退出前的最后一个巡检 tick 会把刚杀掉的实例误判为"崩溃"重新拉起，留下孤儿进程。
 
@@ -334,13 +335,13 @@ node --import "$TSX_URL" \
 | 5 | 退出/重启方式验证 | ✅（含强制停止+干净重启） |
 | 6 | 迁移后 10 项全面整理测试 | ✅ 全过 |
 | 7 | Electron 壳烟测（自拉起→渲染→清理） | ✅ |
-| 8 | 壳关窗清理验证（3080 释放、无残留） | ✅ |
+| 8 | 壳关窗清理验证（3180 释放、无残留） | ✅ |
 | 9 | 全量回归：headless 真实任务往返（`fulltest-aug16`，hello.txt="Hello"，退出码 0） | ✅ 2026-08-16 深夜 |
 | 10 | 全量回归：Web 模式全流程（启动→HTTP 200→WS OPEN→强杀→端口释放→干净重启） | ✅ 2026-08-16 深夜 |
-| 11 | 全量回归：壳烟测在污染环境（`ELECTRON_RUN_AS_NODE=1`）下自愈启动→渲染→清理，3080 释放、无 electron 残留 | ✅ 2026-08-16 深夜 |
+| 11 | 全量回归：壳烟测在污染环境（`ELECTRON_RUN_AS_NODE=1`）下自愈启动→渲染→清理，3180 释放、无 electron 残留 | ✅ 2026-08-16 深夜 |
 | 12 | 全量回归：会话日志管道（zstd 魔数 28 b5 2f fd）与 settings.yaml 完整性 | ✅ 2026-08-16 深夜 |
 | 13 | pnpm 版本机制核实（仓库内自动采用 11.7.0，`pnpm install` 幂等、lockfile 零改动） | ✅ 2026-08-16 深夜 |
-| 14 | 一键启动 bat（双击；启动器约 4 秒自动退出，脱离的后台壳完成全生命周期，3080 释放、零残留） | ✅ 2026-08-16 深夜 |
+| 14 | 一键启动 bat（双击；启动器约 4 秒自动退出，脱离的后台壳完成全生命周期，3180 释放、零残留） | ✅ 2026-08-16 深夜 |
 | 15 | 看门狗冷启动宽限与健康巡检（不再误杀启动中的实例；健康后保持静默） | ✅ 2026-08-16 深夜 |
 | 16 | 解耦验证（壳 AUTOQUIT 退出后后台存活、看门狗在岗） | ✅ 2026-08-16 深夜 |
 | 17 | 崩溃自动重启（手动杀监听进程，约 18 秒内拉起新实例） | ✅ 2026-08-16 深夜 |

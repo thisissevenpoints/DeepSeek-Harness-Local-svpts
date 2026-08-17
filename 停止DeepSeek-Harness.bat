@@ -26,9 +26,9 @@ if exist "%ROOT%desktop\watchdog.pid" (
 )
 
 :WD_GONE
-rem 2) 兜底：清理 3080 上的残留实例（外部手动启动 / 孤儿进程）
-for /f "tokens=5" %%a in ('%SystemRoot%\System32\netstat.exe -ano ^| %SystemRoot%\System32\findstr.exe ":3080" ^| %SystemRoot%\System32\findstr.exe /C:"LISTENING"') do (
-    echo [停止] 清理 3080 残留实例（PID %%a）……
+rem 2) 兜底：清理 3180 上的残留实例（外部手动启动 / 孤儿进程）
+for /f "tokens=5" %%a in ('%SystemRoot%\System32\netstat.exe -ano ^| %SystemRoot%\System32\findstr.exe ":3180" ^| %SystemRoot%\System32\findstr.exe /C:"LISTENING"') do (
+    echo [停止] 清理 3180 残留实例（PID %%a）……
     %SystemRoot%\System32\taskkill.exe /F /T /PID %%a >nul 2>nul
 )
 echo [完成] 后台服务与托盘应用已停止。

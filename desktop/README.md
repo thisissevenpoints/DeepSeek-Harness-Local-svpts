@@ -1,6 +1,6 @@
 # DeepSeek Harness 托盘应用（看门狗 + 桌面壳，Electron MVP）
 
-把 dsh Web UI（http://127.0.0.1:3080）包进一个 **常驻系统托盘的 Electron 应用**：应用本身同时是后台 dsh 服务的唯一 owner（看门狗）与桌面壳（按需开窗）。
+把 dsh Web UI（http://127.0.0.1:3180）包进一个 **常驻系统托盘的 Electron 应用**：应用本身同时是后台 dsh 服务的唯一 owner（看门狗）与桌面壳（按需开窗）。
 
 ## 生命周期模型
 
@@ -57,7 +57,7 @@ cd /d <项目根>
 
 - **双击启动脚本后托盘图标没出现**：环境变量 `ELECTRON_RUN_AS_NODE` 被设为 `1` **或空字符串**都会导致 Electron 以纯 Node 模式运行（启动脚本已用 `$env:VAR = $null` 彻底删除该变量，一般无需手动处理）。直接运行 `electron .` 时需先 `set ELECTRON_RUN_AS_NODE=`（或 PowerShell 里 `$env:ELECTRON_RUN_AS_NODE = $null`）。
 - **窗口一直显示"后台服务启动失败"**：看 `desktop\watchdog.log` 与 `dsh-web.log`；可用停止脚本清理后重试启动。
-- **3080 端口被占**：直接复用已有服务（不重复启动）；停止脚本会停掉 3080 上的一切实例（明确停止即停一切）。
+- **3180 端口被占**：直接复用已有服务（不重复启动）；停止脚本会停掉 3180 上的一切实例（明确停止即停一切）。
 
 ## 已知限制（MVP）
 

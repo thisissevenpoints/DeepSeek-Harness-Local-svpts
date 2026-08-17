@@ -4,7 +4,7 @@
  * - 托盘左键或菜单"打开 DeepSeek Harness"：打开/聚焦应用窗口（关窗回到托盘，后台不停）
  * - 托盘菜单"退出（停止后台服务）"或停止脚本：显式退出才停后台
  * - 启动脚本双击时若已在运行：通过 second-instance 事件直接唤起窗口
- * - 3080 已有外部实例：仅监控不接管也不杀；外部实例退出后自动拉起自己的实例
+ * - 3180 已有外部实例：仅监控不接管也不杀；外部实例退出后自动拉起自己的实例
  * - 停止信号：desktop\watchdog.stop 文件出现 → 清理自己拉起的实例 → 退出（停止脚本兼容）
  * - watchdog.pid：本进程 pid（停止脚本兜底清理用）
  * - 测试钩子：DSH_DESKTOP_SMOKE=1（烟测后停后台退出）、DSH_DESKTOP_AUTOQUIT=1（加载后仅退出、不停后台）
@@ -30,7 +30,7 @@ const path = require('node:path')
 const ROOT_DIR = path.resolve(__dirname, '..')
 const REPO_DIR = process.env.DSH_REPO_DIR || path.join(ROOT_DIR, 'deepseek-harness')
 const DSH_HOME_DIR = process.env.DSH_HOME || path.join(ROOT_DIR, 'dsh-home')
-const WEB_URL = 'http://127.0.0.1:3080'
+const WEB_URL = 'http://127.0.0.1:3180'
 const DIR = __dirname
 const PID_FILE = path.join(DIR, 'watchdog.pid')
 const STOP_FILE = path.join(DIR, 'watchdog.stop')
@@ -78,10 +78,10 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true } catch { return false }
 }
 
-function listenerPidOn3080() {
+function listenerPidOnWebPort() {
   try {
     const out = spawnSync(path.join(SYS32, 'netstat.exe'), ['-ano'], { encoding: 'utf8' }).stdout || ''
-    const line = out.split(/\r?\n/).find((l) => l.includes(':3080') && /LISTENING/i.test(l))
+    const line = out.split(/\r?\n/).find((l) => l.includes(':3180') && /LISTENING/i.test(l))
     if (!line) return null
     const pid = parseInt(line.trim().split(/\s+/).pop(), 10)
     return Number.isInteger(pid) ? pid : null
@@ -102,7 +102,7 @@ function killOwnedBackend() {
     killPid(dshChild.pid)
   }
   if (owned) {
-    const lp = listenerPidOn3080()
+    const lp = listenerPidOnWebPort()
     if (lp && lp !== (dshChild && dshChild.pid)) {
       wlog(`port fallback: killing leftover listener (pid ${lp})`)
       killPid(lp)
@@ -114,7 +114,7 @@ function killOwnedBackend() {
 
 function startDsh() {
   const out = fs.openSync(path.join(DIR, 'dsh-web.log'), 'a')
-  dshChild = spawn('cmd', ['/c', 'pnpm dsh web'], {
+  dshChild = spawn('cmd', ['/c', 'pnpm dsh web --port 3180'], {
     cwd: REPO_DIR,
     env: { ...process.env, DSH_HOME: DSH_HOME_DIR },
     windowsHide: true,
@@ -405,7 +405,7 @@ async function openShellWindow() {
         out.ws = await new Promise((resolve) => {
           let settled = false
           const done = (x) => { if (!settled) { settled = true; resolve(x) } }
-          const ws = new WebSocket('ws://127.0.0.1:3080/api/events.mux')
+          const ws = new WebSocket('ws://127.0.0.1:3180/api/events.mux')
           ws.onopen = () => done('OPEN')
           ws.onerror = (e) => done('ERROR')
           ws.onclose = (e) => done('CLOSE ' + e.code)
