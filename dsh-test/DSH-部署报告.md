@@ -1,12 +1,17 @@
 # DeepSeek Harness (dsh) 本地部署报告
 
-部署日期：2026-08-16　|　部署模式：**模式 B（源码安装）**　|　版本：0.1.0-rc.5（master 分支，developer preview）
+部署日期：2026-08-16　|　部署模式：**模式 B（源码安装）**　|　版本：0.1.0-rc.7（master 分支，developer preview）
 
 > **2026-08-16 迁移记录**：整体迁移至 `<项目根>\`。
 > - 源码：`C:\Users\<username>\dev\deepseek-harness` → `<项目根>\deepseek-harness`（全新 clone 后重装重建）
 > - Harness home：`C:\Users\<username>\.dsh` → `<项目根>\dsh-home`（已设置用户环境变量 `DSH_HOME` 指向此处）
 > - 测试区：`C:\Users\<username>\dsh-test` → `<项目根>\dsh-test`
 > - Ollama 模型：按用户选择**留在 `C:\OllamaModels`**（未改动环境变量）
+
+> **2026-08-17 升级记录**：dsh 升级 **v0.1.0-rc.5 → v0.1.0-rc.7**（`47f943859b` → `99f6f02fec`，111 提交）。
+> - Windows 动态端口保留段（`netsh` 可查：2993-3092）覆盖原 **3080** 导致 EACCES → **端口整体迁移至 3180**（`pnpm dsh web --port 3180`，全链路含托盘应用/启停脚本/探测工具同步）。
+> - 桌面壳已升级为**常驻托盘应用**（看门狗+窗口合一）；项目已发布 GitHub（私有→公开）：`thisissevenpoints/DeepSeek-Harness-Local-svpts`，deepseek-harness 以 submodule 固定。
+> - 升级后烟测通过：3180 就绪、quitBtn 注入、干净退出。
 
 ---
 
@@ -33,7 +38,7 @@ git clone https://github.com/deepseek-ai/deepseek-harness.git   # 成功
 cd deepseek-harness
 pnpm install   # 成功：Done in 28.7s using pnpm v11.7.0（仅示例 bin 的无关 WARN）
 pnpm run build # 成功：tsc host/client + tsdown + Web 前端
-pnpm dsh web   # 成功：dsh web: http://127.0.0.1:3080
+pnpm dsh web   # 成功：dsh web: http://127.0.0.1:3180
 ```
 
 配置（`<项目根>\dsh-home\settings.yaml`，遵循 `llm-pi-ai` 与 `agent-default-model` 官方 schema）：
@@ -63,7 +68,7 @@ agent-default-model:
 |---|---|
 | 启动 | `cd <项目根>\deepseek-harness && pnpm dsh web` |
 | 优雅停止 | 终端内 Ctrl+C（SIGINT，exit 130）或 SIGTERM（exit 0，5 秒排空） |
-| 强制停止 | `netstat -ano \| findstr :3080` 找到 PID → `taskkill /F /PID <pid>` |
+| 强制停止 | `netstat -ano \| findstr :3180` 找到 PID → `taskkill /F /PID <pid>` |
 | 重启 | 停止后重新执行启动命令；settings.yaml 修改热生效（无需重启），但 `.env` 仅启动时加载，改 `.env` 后需重启 |
 | 升级 | `cd <项目根>\deepseek-harness && git pull && pnpm install && pnpm run build` 后重启 |
 
@@ -75,15 +80,15 @@ agent-default-model:
 |---|---|---|---|
 | ollama-local | http://127.0.0.1:11434/v1 | openai-completions | qwen3:8b（默认）、qwen2.5:7b、gemma2:9b-instruct-q4_K_M |
 
-- Web UI 默认地址：http://127.0.0.1:3080（仅监听 127.0.0.1，官方暂不支持 --host 0.0.0.0）
+- Web UI 默认地址：http://127.0.0.1:3180（仅监听 127.0.0.1，官方暂不支持 --host 0.0.0.0）
 - DeepSeek 云端 API：待你在 UI 中填 Key 后即用（Settings → Models 的 DeepSeek 卡片；页面密钥只写不回显）
 
 ## 5. 验收标准逐条结果（迁移前已全部通过，迁移后已复验）
 
 | # | 标准 | 结果 | 证据 |
 |---|---|---|---|
-| 1 | dsh 进程启动、持续运行、打印地址 | ✅ 通过 | 输出 `dsh web: http://127.0.0.1:3080`；netstat 显示 LISTENING |
-| 2 | curl 返回 HTTP 200 | ✅ 通过 | `curl -sI http://127.0.0.1:3080` → `HTTP/1.1 200 OK` |
+| 1 | dsh 进程启动、持续运行、打印地址 | ✅ 通过 | 输出 `dsh web: http://127.0.0.1:3180`；netstat 显示 LISTENING |
+| 2 | curl 返回 HTTP 200 | ✅ 通过 | `curl -sI http://127.0.0.1:3180` → `HTTP/1.1 200 OK` |
 | 3 | 配置模型并完成真实任务往返（独立临时目录创建 hello.txt 写入 Hello） | ✅ 通过（有本地模型注意事项，见下） | 独立临时目录（现位于 `<项目根>\dsh-test\hello-workspace-760`），agent（qwen3:8b）创建 `hello.txt`，内容精确为 `Hello`（5 字节，已 cat 验证）；headless 运行 exit 0、turn reason=completed。另完成 PONG 纯文本往返验证 |
 | 4 | 凭证存储位置与权限 | ✅ 已核实 | 凭证目录 `<项目根>\dsh-home\`（`DSH_HOME` 已设为用户环境变量）。`.credentials.yaml` 在 UI 保存 Key 后生成；settings.yaml/.env 权限 644。部署全程未产生任何真实密钥 |
 | 5 | 退出与重启方式 | ✅ 已记录 | 见第 3 节 |
@@ -101,9 +106,9 @@ cd <项目根>\deepseek-harness && git pull && pnpm install && pnpm run build
 # 启动（前台，Ctrl+C 停止）
 cd <项目根>\deepseek-harness && pnpm dsh web
 # 查看监听进程
-netstat -ano | findstr :3080
+netstat -ano | findstr :3180
 # 单次任务（headless，小模型需附加补丁）
-cd <你的工作目录> && TSX_TSCONFIG_PATH="D:/alpha/DeepSeek-Harness-Local/deepseek-harness/tsconfig.json" node --import "<tsx/esm 绝对路径>" "D:/alpha/DeepSeek-Harness-Local/deepseek-harness/apps/cli/src/bin.ts" --profile headless --patch "D:/alpha/DeepSeek-Harness-Local/dsh-test/no-runtime-context.yml" "<任务>"
+cd <你的工作目录> && TSX_TSCONFIG_PATH="<项目根>/deepseek-harness/tsconfig.json" node --import "<tsx/esm 绝对路径>" "<项目根>/deepseek-harness/apps/cli/src/bin.ts" --profile headless --patch "<项目根>/dsh-test/no-runtime-context.yml" "<任务>"
 # 日志与数据
 #   会话记录：<项目根>\dsh-home\sessions\（zstd 压缩 JSONL）
 #   配置：     <项目根>\dsh-home\settings.yaml（热生效）、.env（启动加载）、profiles\*\cordis.patch.yml
@@ -112,12 +117,12 @@ cd <你的工作目录> && TSX_TSCONFIG_PATH="D:/alpha/DeepSeek-Harness-Local/de
 
 ## 7. 风险提示与下一步建议
 
-1. **预览版兼容性**：当前为 developer preview（0.1.0-rc.5），官方明确提示会有破坏性变更；升级后若启动失败，先 `pnpm install && pnpm run build` 重建，仍失败则查 GitHub Discussions。
+1. **预览版兼容性**：当前为 developer preview（0.1.0-rc.7），官方明确提示会有破坏性变更；升级后若启动失败，先 `pnpm install && pnpm run build` 重建，仍失败则查 GitHub Discussions。
 2. **显存/性能依赖**：qwen3:8b 约 5.2GB，≤8GB 显存可跑但单步约 20 秒；长上下文会额外占用 KV 缓存。显存紧张时可用 qwen2.5:3b（2.2GB）应急，但仅适合简单任务。
 3. **网络依赖**：本地模型链路由 Ollama 常驻服务提供（127.0.0.1:11434）；若用 DeepSeek 云端 API 则需外网。Web UI 仅监听 127.0.0.1，官方暂不支持对外暴露。
 4. **安全隔离**：dsh 默认会话权限为 `workspace-write`（文件修改限于会话工作区与系统临时目录），headless 无审批通道时按"失败关闭"处理。密钥一律由 UI 写入 `DSH_HOME\.credentials.yaml`（只写不回显），请勿把真实密钥放入 `.env`。当前 `.env` 内仅为占位值。
 5. **下一步建议**：
-   - 在浏览器打开 http://127.0.0.1:3080 → Settings → Models 填入 DeepSeek API Key（我全程不接触该密钥）；
+   - 在浏览器打开 http://127.0.0.1:3180 → Settings → Models 填入 DeepSeek API Key（我全程不接触该密钥）；
    - UI 中 "Choose workspace" 选择你要用的项目目录（建议先用 `<项目根>\dsh-test\hello-workspace-760` 试跑）；
    - 编程 agent 日常使用建议切换默认模型到 DeepSeek 云端；本地 qwen3:8b 作为离线备胎；
    - 如需把 dsh 作为常驻后台服务，按第 3 节注册开机自启。
@@ -145,12 +150,12 @@ cd <你的工作目录> && TSX_TSCONFIG_PATH="D:/alpha/DeepSeek-Harness-Local/de
     └── roundtrip-3154\hello.txt        # 迁移后全面整理测试产物
 ```
 
-## 9. Electron 桌面壳（2026-08-16 新增）
+## 9. Electron 托盘应用（2026-08-16 新增，08-17 定版）
 
-- 位置：`<项目根>\desktop\`，启动：`cd desktop && npm start`。
-- 行为：检测 3080 无服务时自动在仓库目录拉起 `pnpm dsh web`（带 DSH_HOME），等待 HTTP 200 + `/api/events.mux` WS 握手就绪后打开窗口；页面 boot 失败自动等待并重载（≤7 次）；关闭窗口时 `taskkill /T /F` 清理自己拉起的 dsh 进程树，外部实例不受影响。
-- 烟测：`set DSH_DESKTOP_SMOKE=1 && npm start` 自动截图 smoke.png、输出页面诊断 smoke.txt 后退出。已验证：自拉起 → 完整 UI 渲染（含"选择工作区"主界面）→ 退出清理全链路通过。
-- 踩坑记录：① 本机会话环境设有 `ELECTRON_RUN_AS_NODE=1`，会导致 Electron 以纯 Node 运行，启动前需清空该变量；② Electron 37 已移除 `BrowserWindow.setWindowOpenHandler`，需用 `win.webContents.setWindowOpenHandler`；③ 主进程用 fetch+Upgrade 头探测 WS 端点不稳定（会挂起/崩溃），已改用 `ws` 包握手探测。
-- 已知限制：无托盘、无开机自启；窗口关闭即停 dsh 服务。
+- 位置：`<项目根>\desktop\`，日常入口：双击 `<项目根>\启动DeepSeek-Harness.bat`（启动器数秒后自动关闭）；停止：托盘右键"退出（停止后台服务）"或双击停止脚本。
+- 架构：`main.cjs` 为**单一常驻托盘 Electron 应用**（看门狗 + 桌面壳合一）——后台 dsh 服务唯一 owner（健康巡检 5s、子进程存活判据防误杀慢启动、崩溃自动重启、`watchdog.stop` 文件信号停止、`watchdog.pid` 兜底）+ 窗口（loading 页即时反馈 → 就绪后真实 UI）。关窗回托盘后台续跑；再双击启动约 2 秒唤起窗口。
+- 附加能力：界面右上角 ⏻ **完全退出按钮**（壳注入，不改 DSH 本体；确认后停前后端）；窗口/任务栏图标与托盘同源（app.ico）；`ELECTRON_RUN_AS_NODE` 自愈（bat 内 `$env:VAR=$null` 彻底删除）。
+- 烟测：`set DSH_DESKTOP_SMOKE=1` 后双击启动脚本 → 自动截图 smoke.png、输出页面诊断 smoke.txt（含 quitBtn 字段）→ 停后台退出。升级 dsh 后建议必跑。
+- 已知限制：无开机自启、无更新检查、无打包。
 
 > **2026-08-16 迁移后全面整理测试（复验）**：环境变量 `DSH_HOME` 已写入用户注册表；Web 首页与前端资产均 200；Ollama 四个模型在线；仓库工作树干净、构建产物完好；全新独立目录 `roundtrip-3154` 完成 hello.txt 真实任务往返（exit 0）；新会话按 D 盘路径键名正常落盘；profile 符号链接自愈指向 D 盘；配置与存储无 C 盘路径残留；C 盘原三处位置已确认删除。全部检查通过，无遗留问题。
