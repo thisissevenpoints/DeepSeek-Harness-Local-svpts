@@ -36,6 +36,7 @@
 ├── 启动DeepSeek-Harness.bat      # 一键启动（托盘应用；双击；启动器窗口数秒后自动关闭不常驻；GBK+CRLF 编码约束见 §8-16）
 ├── 停止DeepSeek-Harness.bat      # 一键停止（托盘应用+后台服务；双击；优雅信号+端口兜底）
 ├── 部署DeepSeek-Harness.bat      # 一键部署（git 拉取后环境审查与补足：Node/pnpm/git/Ollama 审查、dsh-home/.env 补足、子模块初始化、依赖构建、Electron；幂等可重跑）
+├── 备份恢复DeepSeek-Harness.bat + backup-restore.ps1  # 对话存档备份/恢复/更新（PowerShell 内置 Compress-Archive，零依赖；见 §13）
 │
 ├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.0-rc.5）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
@@ -356,6 +357,20 @@ node --import "$TSX_URL" \
 | 21 | 完整用户流程回归（启动→关窗→再双击唤起→停止全清） | ✅ 2026-08-16 深夜 |
 | 22 | 慢启动不误杀验证（进程存活判据，后台随负载波动 10-30 秒下稳定健康） | ✅ 2026-08-16 深夜 |
 | 23 | UI 右上角完全退出按钮（并行烟测注入验证 quitBtn=true、⏻ 渲染、不扰动运行中会话） | ✅ 2026-08-16 深夜 |
+
+## 13. 对话存档备份 / 恢复 / 更新（2026-08-18 新增）
+
+双击 `备份恢复DeepSeek-Harness.bat` 菜单操作（PowerShell 内置压缩，零依赖）：
+
+| 操作 | 行为 |
+|---|---|
+| 备份 | 将 `dsh-home\sessions\` 打包为 zip（弹保存对话框，默认名 `dsh-sessions-时间戳.zip`） |
+| 恢复 | 从选中的 zip 还原对话存档；**当前会话先自动改名留底**（`sessions.bak-时间戳`，可手动回退） |
+| 更新 | 将当前对话存档**合并进既有备份 zip**（`Compress-Archive -Update`）——迁移场景：备份 → 迁移后改工作区 → 更新同一 zip 增量累积 |
+
+- 命令行直用（自动化）：`powershell -NoProfile -ExecutionPolicy Bypass -File backup-restore.ps1 -Action backup|update|restore -ZipPath <路径>`（带 `-ZipPath` 跳过对话框）。
+- 技术要点：`backup-restore.ps1` 为 UTF-8 BOM 编码（PowerShell 5.1/7 均正确识别）；bat 为 GBK+CRLF（同 §8-16 约束）；文件对话框来自 `System.Windows.Forms`（Windows 内置）。
+- 建议备份前先停止托盘应用（避免会话写入中的不一致），非强制。
 
 ## 12. 待办与建议
 

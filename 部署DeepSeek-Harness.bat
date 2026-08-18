@@ -155,6 +155,7 @@ echo   2) 停止：托盘右键"退出"或双击 停止DeepSeek-Harness.bat
 echo   3) 升级 dsh 后建议先跑一次烟测：
 echo      set DSH_DESKTOP_SMOKE=1 后双击启动脚本
 echo   4) 详细说明见 README.md 与 HANDOVER.md
+echo   5) 备份/恢复对话存档：双击 备份恢复DeepSeek-Harness.bat
 echo ==========================================
 %SystemRoot%\System32\PING.EXE -n 4 127.0.0.1 >nul
 exit /b 0

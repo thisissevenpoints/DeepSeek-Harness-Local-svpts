@@ -15,6 +15,9 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 ::   自动审查 Node/pnpm/git/Ollama，补足 dsh-home/.env、初始化子模块、安装依赖并构建
 :: 启动：双击 启动DeepSeek-Harness.bat
 :: 停止：托盘右键"退出（停止后台服务）"，或双击 停止DeepSeek-Harness.bat
+:: 对话存档备份/迁移：双击 备份恢复DeepSeek-Harness.bat
+::   备份 = 打包 dsh-home\sessions 为 zip；恢复 = 解包还原（当前会话自动留底）；
+::   更新 = 将当前会话合并进既有备份 zip（迁移到新机器时先备份、后恢复）
 ```
 
 - 首次启动：托盘图标 + 窗口自动打开（loading 页即时反馈，后台就绪后切入真实 UI）
@@ -33,6 +36,7 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 ```
 ├── 启动DeepSeek-Harness.bat / 停止DeepSeek-Harness.bat   # 一键启停（GBK+CRLF 编码）
 ├── 部署DeepSeek-Harness.bat   # 一键部署：拉取后环境审查与补足（幂等，可重复运行）
+├── 备份恢复DeepSeek-Harness.bat + backup-restore.ps1      # 对话存档备份/恢复/更新（PowerShell 内置压缩，零依赖）
 ├── desktop\            # 托盘应用（main.cjs 看门狗+窗口、tray.png、package.json）
 ├── deepseek-harness\   # 上游仓库（git submodule，固定到经过验证的提交）
 ├── dsh-home\           # Harness home（本机数据，不入库；首次运行自动创建）
