@@ -290,6 +290,11 @@ const OVERLAY_INJECT = `(() => {
   toolbar.appendChild(sessBtn)
   overlay.appendChild(toolbar)
   document.body.appendChild(overlay)
+  // 让出空间而非覆盖：给页面内容加等量 padding-top，两栏悬于顶部不遮挡内容
+  const h = overlay.offsetHeight
+  document.body.style.paddingTop = h + 'px'
+  document.body.style.boxSizing = 'border-box'
+  document.body.dataset.dshOverlayH = String(h)
 })()`
 
 function injectOverlay(w) {
@@ -466,6 +471,22 @@ async function openShellWindow() {
         .map((n) => 'dsh-desktop-' + n)
         .filter((id) => !!document.getElementById(id)).length
       out.openSessionsBtn = !!document.getElementById('dsh-desktop-open-sessions')
+      out.overlayHeight = document.body.dataset.dshOverlayH || '0'
+      out.bodyPaddingTop = document.body.style.paddingTop
+      out.geometry = (() => {
+        const ov = document.getElementById('dsh-desktop-overlay')
+        if (!ov) return 'NO_OVERLAY'
+        const ovBottom = ov.getBoundingClientRect().bottom
+        const topEl = [...document.querySelectorAll('body *')]
+          .filter((el) => {
+            if (el.closest('#dsh-desktop-overlay')) return false
+            const r = el.getBoundingClientRect()
+            return r.height > 4 && r.width > 4
+          })
+          .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0]
+        const t = topEl ? topEl.getBoundingClientRect().top : -1
+        return JSON.stringify({ overlayBottom: Math.round(ovBottom), topContentTop: Math.round(t), overlap: t < ovBottom })
+      })()
       out.bodyText = document.body ? document.body.innerText.slice(0, 300) : '(no body)'
       try {
         const r = await fetch('/api/events.mux', { headers: { Upgrade: 'websocket' } })
