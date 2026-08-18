@@ -18,3 +18,4 @@ desktop/node_modules/
 Thumbs.db
 .DS_Store
 dsh-test/stability-check/
+dsh-test/*.zip
