@@ -10,7 +10,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$sessionsDir = Join-Path $root 'dsh-home\sessions'
+# 工作区迁移后：读取 home-location.json 定位当前 home（默认 <root>\dsh-home）
+$homeDir = Join-Path $root 'dsh-home'
+$locFile = Join-Path $root 'desktop\home-location.json'
+if (Test-Path $locFile) {
+  try {
+    $loc = Get-Content $locFile -Raw | ConvertFrom-Json
+    if ($loc.home) { $homeDir = $loc.home }
+  } catch {}
+}
+$sessionsDir = Join-Path $homeDir 'sessions'
 if (-not (Test-Path $sessionsDir)) { New-Item -ItemType Directory -Path $sessionsDir -Force | Out-Null }
 
 Add-Type -AssemblyName System.Windows.Forms | Out-Null

@@ -186,13 +186,14 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 
 - **顶栏**（高 36px，半透明深色，整条可拖拽移动窗口）：
   - 左侧应用名"DeepSeek Harness"；
-  - 右侧按钮**自右向左**：`⏻ 完全退出`（确认框后停前后端）、`✕ 关闭窗口`（回托盘）、`⛶ 最大化/还原`、`─ 最小化`；
+  - 右侧按钮**自右向左**：`⏻ 完全退出`（确认框后停前后端）、`─ 最小化`、`⛶ 最大化/还原`、`✕ 关闭窗口`（回托盘）；
 - **功能按钮区**（顶栏下方一行，2026-08-18 扩展为 4 个）：
   - `📁 打开会话存档` —— 打开 `dsh-home\sessions` 文件夹（不存在则自动创建）；
   - `💾 备份` —— 弹**图形化保存对话框**选路径，将对话存档打包为 zip（默认名 `dsh-sessions-时间戳.zip`，默认位置"文档"）；
-  - `📤 迁移` —— 弹**图形化打开对话框**选既有备份 zip，将当前对话存档**合并进**该备份（增量更新/跨机迁移）；
+  - `📤 迁移` —— **工作区迁移**：弹**图形化目录选择**选空目录，把整个工作区（dsh-home：会话/设置/配置）**搬移过去**（先停后台，搬移后写 `desktop\home-location.json` 记录新位置，重启生效）；
+  - `🔄 备份更新` —— 弹**图形化打开对话框**选既有备份 zip，将当前对话存档**合并进**该备份（增量更新/跨机累积）；
   - `📥 恢复` —— 弹**图形化打开对话框**选备份 zip 还原（当前会话自动改名留底可回退）；
-  - 执行引擎复用 `backup-restore.ps1`（主进程 `dialog` 选路径 → spawnSync PowerShell）；完成弹结果框（成功/失败+详情）；2 秒防重窗口防连击双触发；
+  - 执行引擎复用 `backup-restore.ps1`（主进程 `dialog` 选路径 → **异步** PowerShell，不阻塞主进程）；完成弹结果框；全局互斥锁防并发；
 - **让出空间而非覆盖**：注入后量取两栏实际高度（约 83px），给页面 body 加等量 `padding-top`，内容从两栏下方开始、零遮挡（烟测几何验证 `overlap:false`）。
 - 通知机制：**console 标记分派**（页面 `console.log('DSH_DESKTOP_*')` → 壳 `console-message` 必然送达，主通道）+ 自定义协议导航兜底（仅退出按钮保留双通道、带去重）。
 - 页面每次加载（含自动重载循环）后自动重新注入；loading/错误页（data:）不注入；
@@ -365,7 +366,7 @@ node --import "$TSX_URL" \
 
 ## 13. 对话存档备份 / 恢复 / 更新（2026-08-18 新增）
 
-**界面内操作（推荐）**：托盘应用窗口第二排功能按钮区 —— `💾 备份` / `📤 迁移` / `📥 恢复`，均弹原生图形化文件对话框选路径，完成弹结果框。
+**界面内操作（推荐）**：托盘应用窗口第二排功能按钮区 —— `💾 备份` / `📤 迁移`（工作区搬移，非备份合并）/ `🔄 备份更新` / `📥 恢复`，均弹原生图形化文件对话框选路径，完成弹结果框。
 
 **独立菜单 bat**（`备份恢复DeepSeek-Harness.bat`，PowerShell 内置压缩，零依赖）：
 
@@ -378,6 +379,26 @@ node --import "$TSX_URL" \
 - 命令行直用（自动化）：`powershell -NoProfile -ExecutionPolicy Bypass -File backup-restore.ps1 -Action backup|update|restore -ZipPath <路径>`（带 `-ZipPath` 跳过对话框）。
 - 技术要点：`backup-restore.ps1` 为 UTF-8 BOM 编码（PowerShell 5.1/7 均正确识别）；bat 为 GBK+CRLF（同 §8-16 约束）；文件对话框来自 `System.Windows.Forms`（Windows 内置）。
 - 建议备份前先停止托盘应用（避免会话写入中的不一致），非强制。
+
+## 14. 跨平台与安卓化评估（2026-08-18）
+
+### Linux / macOS 支持（已代码化，仅 Windows 实测）
+
+- `main.cjs` 平台适配层（`IS_WIN` 分支）：进程终止（Windows taskkill / POSIX `process.kill`+SIGTERM）、端口探测（netstat / `lsof`）、dsh spawn（`cmd /c pnpm` / 直接 spawn + detached 进程组）、AUMID 仅 Windows；
+- 脚本：`start.sh` / `stop.sh` / `deploy.sh`（等价 bat 三件套，语法已校验；**POSIX 行为未实测，需在 Linux/macOS 上验证**）；
+- 备份/恢复工具（PowerShell ps1）为 Windows 专属；POSIX 平台界面按钮会提示用系统 zip/tar 手动备份。
+
+### 安卓化评估（结论：不建议原生安卓化，推荐远程访问）
+
+| 维度 | 现状 | 安卓化障碍 |
+|---|---|---|
+| 应用壳 | Electron 托盘应用 | Electron **不支持安卓**；需换 WebView 方案（Capacitor/Cordova 包 web UI） |
+| dsh 后端 | Node.js ≥22（TS/ESM） | 安卓可跑（Termux 受限环境），但后台常驻受限（安卓进程管理/电池优化会杀后台） |
+| 本地模型 | Ollama + qwen3:8b（5.2GB） | **Ollama 无官方安卓版**，本地推理不可行（显存/功耗） |
+| 云端 API | DeepSeek API | ✅ 可行 |
+| 网络 | dsh 仅监听 127.0.0.1，官方不支持 --host 0.0.0.0 | 手机无法直连；需隧道（Tailscale/SSH 端口转发）或反向代理暴露 |
+
+**推荐路径**：dsh 部署在 PC/服务器（或云 VPS 配云端 API Key），安卓端用浏览器或 WebView 经 Tailscale/SSH 隧道访问 —— 工作量和收益最优。若官方未来支持 `--host 0.0.0.0`，再配反向代理即可秒级实现手机访问。原生安卓 App（本地跑 dsh + 模型）当前不可行。
 
 ## 12. 待办与建议
 

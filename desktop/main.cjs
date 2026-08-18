@@ -26,10 +26,15 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 // 路径基于脚本位置推导（项目根 = desktop 的上级），支持任意部署位置；
-// DSH_REPO_DIR / DSH_HOME 环境变量可覆盖
+// DSH_REPO_DIR / DSH_HOME 环境变量可覆盖；HOME_LOC_FILE 记录迁移后的工作区位置
 const ROOT_DIR = path.resolve(__dirname, '..')
 const REPO_DIR = process.env.DSH_REPO_DIR || path.join(ROOT_DIR, 'deepseek-harness')
-const DSH_HOME_DIR = process.env.DSH_HOME || path.join(ROOT_DIR, 'dsh-home')
+const HOME_LOC_FILE = path.join(__dirname, 'home-location.json')
+let DSH_HOME_DIR = process.env.DSH_HOME || path.join(ROOT_DIR, 'dsh-home')
+try {
+  const loc = JSON.parse(fs.readFileSync(HOME_LOC_FILE, 'utf8'))
+  if (loc && loc.home) DSH_HOME_DIR = loc.home // 迁移后的工作区位置
+} catch { /* 无迁移记录，用默认位置 */ }
 const WEB_URL = 'http://127.0.0.1:3180'
 const DIR = __dirname
 const PID_FILE = path.join(DIR, 'watchdog.pid')
@@ -42,6 +47,7 @@ const HEALTH_INTERVAL_MS = 5000
 const BOOT_TIMEOUT_MS = 180000 // 子进程存活但迟迟不监听的兜底上限（3 分钟）
 const MAX_CONSECUTIVE_FAILURES = 4
 const SYS32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')
+const IS_WIN = process.platform === 'win32'
 const SMOKE = process.env.DSH_DESKTOP_SMOKE === '1'
 const AUTOQUIT = process.env.DSH_DESKTOP_AUTOQUIT === '1'
 
@@ -80,10 +86,16 @@ function pidAlive(pid) {
 
 function listenerPidOnWebPort() {
   try {
-    const out = spawnSync(path.join(SYS32, 'netstat.exe'), ['-ano'], { encoding: 'utf8' }).stdout || ''
-    const line = out.split(/\r?\n/).find((l) => l.includes(':3180') && /LISTENING/i.test(l))
-    if (!line) return null
-    const pid = parseInt(line.trim().split(/\s+/).pop(), 10)
+    if (IS_WIN) {
+      const out = spawnSync(path.join(SYS32, 'netstat.exe'), ['-ano'], { encoding: 'utf8' }).stdout || ''
+      const line = out.split(/\r?\n/).find((l) => l.includes(':3180') && /LISTENING/i.test(l))
+      if (!line) return null
+      const pid = parseInt(line.trim().split(/\s+/).pop(), 10)
+      return Number.isInteger(pid) ? pid : null
+    }
+    // POSIX: lsof -t -i :3180
+    const out = spawnSync('lsof', ['-t', '-i', ':3180'], { encoding: 'utf8' }).stdout || ''
+    const pid = parseInt(out.trim().split(/\r?\n/)[0], 10)
     return Number.isInteger(pid) ? pid : null
   } catch {
     return null
@@ -92,7 +104,11 @@ function listenerPidOnWebPort() {
 
 function killPid(pid) {
   if (!pid || !Number.isInteger(pid) || pid === process.pid) return
-  try { spawnSync(path.join(SYS32, 'taskkill.exe'), ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }) } catch { /* 尽力而为 */ }
+  if (IS_WIN) {
+    try { spawnSync(path.join(SYS32, 'taskkill.exe'), ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' }) } catch { /* 尽力而为 */ }
+  } else {
+    try { process.kill(pid, 'SIGTERM') } catch { /* 尽力而为 */ }
+  }
 }
 
 function killOwnedBackend() {
@@ -114,12 +130,22 @@ function killOwnedBackend() {
 
 function startDsh() {
   const out = fs.openSync(path.join(DIR, 'dsh-web.log'), 'a')
-  dshChild = spawn('cmd', ['/c', 'pnpm dsh web --port 3180'], {
-    cwd: REPO_DIR,
-    env: { ...process.env, DSH_HOME: DSH_HOME_DIR },
-    windowsHide: true,
-    stdio: ['ignore', out, out],
-  })
+  if (IS_WIN) {
+    dshChild = spawn('cmd', ['/c', 'pnpm dsh web --port 3180'], {
+      cwd: REPO_DIR,
+      env: { ...process.env, DSH_HOME: DSH_HOME_DIR },
+      windowsHide: true,
+      stdio: ['ignore', out, out],
+    })
+  } else {
+    // POSIX: 直接 spawn pnpm（detached 独立进程组，便于整组终止）
+    dshChild = spawn('pnpm', ['dsh', 'web', '--port', '3180'], {
+      cwd: REPO_DIR,
+      env: { ...process.env, DSH_HOME: DSH_HOME_DIR },
+      detached: true,
+      stdio: ['ignore', out, out],
+    })
+  }
   dshChild.on('exit', (code) => wlog(`dsh child exited (code ${code})`))
   owned = true
   lastSpawnAt = Date.now()
@@ -242,7 +268,8 @@ const CONSOLE_MARKERS = {
   CLOSE_WINDOW: 'DSH_DESKTOP_CLOSE_WINDOW',
   OPEN_SESSIONS: 'DSH_DESKTOP_OPEN_SESSIONS',
   BACKUP: 'DSH_DESKTOP_BACKUP',
-  MIGRATE: 'DSH_DESKTOP_MIGRATE',
+  UPDATE: 'DSH_DESKTOP_UPDATE', // 备份更新：合并进既有备份
+  MIGRATE: 'DSH_DESKTOP_MIGRATE', // 迁移：工作区换位置并搬文件
   RESTORE: 'DSH_DESKTOP_RESTORE',
 }
 const OVERLAY_INJECT = `(() => {
@@ -271,15 +298,15 @@ const OVERLAY_INJECT = `(() => {
     b.className = 'dsh-dt-btn'
     b.title = titleText
     b.textContent = glyph
-    b.onclick = () => console.log('DSH_DESKTOP_' + id.replace('dsh-desktop-', '').toUpperCase())
+    b.onclick = () => console.log('DSH_DESKTOP_' + id.replace('dsh-desktop-', '').toUpperCase().replace(/-/g, '_'))
     return b
   }
   bar.appendChild(title)
-  // 自右向左：完全退出 / 关闭窗口 / 最大化 / 最小化
+  // 自右向左：完全退出 / 最小化 / 最大化-还原 / 关闭窗口
   bar.appendChild(mkBtn('dsh-desktop-quit', '完全退出（停止前端与后台）', '\\u23FB'))
-  bar.appendChild(mkBtn('dsh-desktop-close-window', '关闭窗口（回到托盘）', '\\u2715'))
-  bar.appendChild(mkBtn('dsh-desktop-maximize', '最大化 / 还原', '\\u2750'))
   bar.appendChild(mkBtn('dsh-desktop-minimize', '最小化', '\\u2500'))
+  bar.appendChild(mkBtn('dsh-desktop-maximize', '最大化 / 还原', '\\u2750'))
+  bar.appendChild(mkBtn('dsh-desktop-close-window', '关闭窗口（回到托盘）', '\\u2715'))
   overlay.appendChild(bar)
   // 预备功能按钮区
   const toolbar = document.createElement('div')
@@ -290,12 +317,13 @@ const OVERLAY_INJECT = `(() => {
     b.className = 'dsh-tool-btn'
     b.title = titleText
     b.innerHTML = html
-    b.onclick = () => console.log('DSH_DESKTOP_' + id.replace('dsh-desktop-', '').toUpperCase())
+    b.onclick = () => console.log('DSH_DESKTOP_' + id.replace('dsh-desktop-', '').toUpperCase().replace(/-/g, '_'))
     return b
   }
   toolbar.appendChild(mkTool('dsh-desktop-open-sessions', '打开对话存档文件夹（dsh-home\\sessions）', '<span style="font-size:14px">\\uD83D\\uDCC1</span> 打开会话存档'))
   toolbar.appendChild(mkTool('dsh-desktop-backup', '将对话存档打包为 zip（可选保存位置）', '<span style="font-size:14px">\\uD83D\\uDCBE</span> 备份'))
-  toolbar.appendChild(mkTool('dsh-desktop-migrate', '将当前对话存档合并进既有备份 zip（迁移/增量更新）', '<span style="font-size:14px">\\uD83D\\uDCE4</span> 迁移'))
+  toolbar.appendChild(mkTool('dsh-desktop-migrate', '工作区迁移：选择新位置并把整个工作区（dsh-home）搬过去', '<span style="font-size:14px">\\uD83D\\uDCE4</span> 迁移'))
+  toolbar.appendChild(mkTool('dsh-desktop-update', '备份更新：将当前对话存档合并进既有备份 zip', '<span style="font-size:14px">\\uD83D\\uDD04</span> 备份更新'))
   toolbar.appendChild(mkTool('dsh-desktop-restore', '从备份 zip 还原对话存档（当前会话自动留底可回退）', '<span style="font-size:14px">\\uD83D\\uDCE5</span> 恢复'))
   overlay.appendChild(toolbar)
   document.body.appendChild(overlay)
@@ -359,28 +387,47 @@ async function pickZipPath(action) {
 }
 
 function runBackupTool(action, zip) {
-  try {
-    const r = spawnSync(
-      path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', BACKUP_PS1, '-Action', action, '-ZipPath', zip],
-      { encoding: 'utf8', timeout: 300000, windowsHide: true },
-    )
-    const out = (((r.stdout || '') + (r.stderr || '')).trim().split(/\r?\n/).pop()) || '完成'
-    return { ok: r.status === 0, out }
-  } catch (e) {
-    return { ok: false, out: String(e && e.message || e) }
-  }
+  // 异步执行（不阻塞主进程）：spawnSync 会阻塞事件循环，导致渲染进程 console 消息
+  // 积压后批量乱序派发（曾引发重复执行与留底 rename 冲突）
+  return new Promise((resolve) => {
+    let out = ''
+    try {
+      const ps = spawn(
+        path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', BACKUP_PS1, '-Action', action, '-ZipPath', zip],
+        { windowsHide: true },
+      )
+      ps.stdout.on('data', (d) => { out += d })
+      ps.stderr.on('data', (d) => { out += d })
+      ps.on('close', (code) => {
+        const lines = out.trim().split(/\r?\n/)
+        resolve({ ok: code === 0, out: lines[lines.length - 1] || '完成' })
+      })
+      ps.on('error', (e) => resolve({ ok: false, out: String(e && e.message || e) }))
+    } catch (e) {
+      resolve({ ok: false, out: String(e && e.message || e) })
+    }
+  })
 }
 
-const backupInFlight = {} // 去重：2 秒窗口内同一操作只执行一次（防连击/事件双触发）
+let backupBusy = false // 全局互斥：任一备份操作进行中，其他操作直接忽略（防并发冲突）
 async function handleBackupAction(action) {
-  if (backupInFlight[action]) return
-  backupInFlight[action] = true
+  if (backupBusy) return
+  if (!IS_WIN) {
+    // 备份工具（PowerShell ps1）当前为 Windows 专属；POSIX 用系统 zip/tar 手动备份
+    await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'info', title: '备份工具',
+      message: '备份/恢复工具当前支持 Windows',
+      detail: 'Linux/macOS 请用系统 zip/tar 手动备份 dsh-home 目录。',
+    })
+    return
+  }
+  backupBusy = true
   try {
     const { path: zip, canceled } = await pickZipPath(action)
     if (canceled || !zip) return
     slog(`backup action ${action} → ${zip}`)
-    const res = runBackupTool(action, zip)
+    const res = await runBackupTool(action, zip)
     wlog(`backup action ${action} ${res.ok ? 'OK' : 'FAIL'}: ${res.out}`)
     if (process.env.DSH_DESKTOP_TEST_ZIP) return // 测试模式不弹结果框
     await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
@@ -390,7 +437,67 @@ async function handleBackupAction(action) {
       detail: res.out,
     })
   } finally {
-    setTimeout(() => { backupInFlight[action] = false }, 2000)
+    backupBusy = false
+  }
+}
+
+// —— 工作区迁移：选择新位置，把整个工作区（dsh-home）搬过去 ——
+async function migrateWorkspace() {
+  let target = process.env.DSH_DESKTOP_TEST_MIGRATE_TO || '' // 测试钩子：预设路径跳过对话框
+  slog(`migrateWorkspace: test_target=[${target}]`)
+  if (!target) {
+    const r = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, {
+      title: '选择工作区迁移目标目录（需为空目录）',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (r.canceled) return
+    target = r.filePaths[0] || ''
+  }
+  if (!target) return
+  // 校验目标为空目录
+  try {
+    const entries = fs.readdirSync(target)
+    if (entries.length > 0) {
+      if (!process.env.DSH_DESKTOP_TEST_MIGRATE_TO) {
+        await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+          type: 'error', title: '迁移失败', message: '目标目录非空', detail: '请选择空目录作为迁移目标。',
+        })
+      }
+      return
+    }
+  } catch {
+    return
+  }
+  // 停后台（避免会话写入中的不一致），再搬移
+  wlog(`migrate: stopping backend before move`)
+  killOwnedBackend()
+  try {
+    fs.cpSync(DSH_HOME_DIR, target, { recursive: true })
+    fs.rmSync(DSH_HOME_DIR, { recursive: true, force: true })
+  } catch (e) {
+    wlog(`migrate failed: ${e && e.message || e}`)
+    if (!process.env.DSH_DESKTOP_TEST_MIGRATE_TO) {
+      await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+        type: 'error', title: '迁移失败', message: '搬移工作区失败', detail: String(e && e.message || e),
+      })
+    }
+    return
+  }
+  // 记录新位置（下次启动生效）
+  try {
+    fs.writeFileSync(HOME_LOC_FILE, JSON.stringify({ home: target }, null, 2))
+  } catch (e) {
+    wlog(`migrate: failed to write home-location.json: ${e && e.message || e}`)
+  }
+  DSH_HOME_DIR = target
+  wlog(`workspace migrated to ${target}`)
+  slog(`workspace migrated to ${target}`)
+  if (!process.env.DSH_DESKTOP_TEST_MIGRATE_TO) {
+    await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'info', title: '迁移完成',
+      message: '工作区已迁移',
+      detail: `新位置：${target}\n后台已停止，请重启应用使新位置生效。`,
+    })
   }
 }
 
@@ -418,8 +525,11 @@ function dispatchUiMessage(marker) {
     case CONSOLE_MARKERS.BACKUP:
       handleBackupAction('backup')
       break
-    case CONSOLE_MARKERS.MIGRATE:
+    case CONSOLE_MARKERS.UPDATE:
       handleBackupAction('update')
+      break
+    case CONSOLE_MARKERS.MIGRATE:
+      migrateWorkspace()
       break
     case CONSOLE_MARKERS.RESTORE:
       handleBackupAction('restore')
@@ -545,14 +655,24 @@ async function openShellWindow() {
     app.quit()
   }
   if (process.env.DSH_DESKTOP_AUTOBACKUPTEST === '1') {
-    // 串行点击 备份→迁移→恢复（配合 DSH_DESKTOP_TEST_ZIP 跳过对话框）
+    // 串行点击 备份→备份更新→恢复（配合 DSH_DESKTOP_TEST_ZIP 跳过对话框）
     await new Promise(r => setTimeout(r, 3000))
-    for (const id of ['dsh-desktop-backup', 'dsh-desktop-migrate', 'dsh-desktop-restore']) {
+    for (const id of ['dsh-desktop-backup', 'dsh-desktop-update', 'dsh-desktop-restore']) {
       slog(`autobackuptest: clicking ${id}`)
       await win.webContents.executeJavaScript(`document.getElementById('${id}')?.click()`)
-      await new Promise(r => setTimeout(r, 7000)) // 等待压缩/解压完成
+      await new Promise(r => setTimeout(r, 12000)) // 等待压缩/解压完成（console 消息可能延迟派发）
     }
     slog('autobackuptest done, quitting')
+    quitting = true
+    app.quit()
+  }
+  if (process.env.DSH_DESKTOP_AUTOMIGRATETEST === '1') {
+    // 点击迁移按钮（配合 DSH_DESKTOP_TEST_MIGRATE_TO 预设目标目录跳过对话框）
+    await new Promise(r => setTimeout(r, 3000))
+    slog('automigratetest: clicking migrate button')
+    await win.webContents.executeJavaScript(`document.getElementById('dsh-desktop-migrate')?.click()`)
+    await new Promise(r => setTimeout(r, 6000))
+    slog('automigratetest done, quitting')
     quitting = true
     app.quit()
   }
@@ -566,8 +686,12 @@ async function openShellWindow() {
       out.titlebarBtns = ['quit', 'minimize', 'maximize', 'close-window']
         .map((n) => 'dsh-desktop-' + n)
         .filter((id) => !!document.getElementById(id)).length
+      out.titlebarOrder = [...(document.getElementById('dsh-desktop-titlebar')?.children || [])]
+        .filter((el) => el.classList.contains('dsh-dt-btn'))
+        .map((el) => el.id.replace('dsh-desktop-', ''))
+        .join(',')
       out.openSessionsBtn = !!document.getElementById('dsh-desktop-open-sessions')
-      out.backupBtns = ['backup', 'migrate', 'restore']
+      out.backupBtns = ['backup', 'migrate', 'update', 'restore']
         .map((n) => 'dsh-desktop-' + n)
         .filter((id) => !!document.getElementById(id)).length
       out.overlayHeight = document.body.dataset.dshOverlayH || '0'
@@ -629,8 +753,8 @@ function quitApp(stopBackend) {
 
 // ================= 主流程 =================
 function main() {
-  // 未打包应用设置 AUMID：任务栏图标正确跟随窗口 icon，分组与任务栏行为更稳定
-  app.setAppUserModelId('com.svpts.deepseek-harness-local')
+  // 未打包应用设置 AUMID（仅 Windows）：任务栏图标正确跟随窗口 icon，分组与任务栏行为更稳定
+  if (IS_WIN) app.setAppUserModelId('com.svpts.deepseek-harness-local')
   fs.writeFileSync(PID_FILE, String(process.pid))
   fs.rmSync(STOP_FILE, { force: true }) // 清掉可能残留的停止标记
   wlog(`tray app started (pid ${process.pid})${SMOKE ? ' (smoke)' : ''}${AUTOQUIT ? ' (autoquit)' : ''}`)
