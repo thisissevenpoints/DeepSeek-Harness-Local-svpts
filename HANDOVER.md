@@ -35,6 +35,7 @@
 ├── HANDOVER.md                  # 本文档
 ├── 启动DeepSeek-Harness.bat      # 一键启动（托盘应用；双击；启动器窗口数秒后自动关闭不常驻；GBK+CRLF 编码约束见 §8-16）
 ├── 停止DeepSeek-Harness.bat      # 一键停止（托盘应用+后台服务；双击；优雅信号+端口兜底）
+├── 部署DeepSeek-Harness.bat      # 一键部署（git 拉取后环境审查与补足：Node/pnpm/git/Ollama 审查、dsh-home/.env 补足、子模块初始化、依赖构建、Electron；幂等可重跑）
 │
 ├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.0-rc.5）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）

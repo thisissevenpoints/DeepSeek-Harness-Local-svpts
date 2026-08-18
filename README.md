@@ -11,6 +11,8 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 ## 快速开始
 
 ```bat
+:: 第一步（git 拉取后只需一次，可重复运行）：双击 部署DeepSeek-Harness.bat
+::   自动审查 Node/pnpm/git/Ollama，补足 dsh-home/.env、初始化子模块、安装依赖并构建
 :: 启动：双击 启动DeepSeek-Harness.bat
 :: 停止：托盘右键"退出（停止后台服务）"，或双击 停止DeepSeek-Harness.bat
 ```
@@ -30,6 +32,7 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 
 ```
 ├── 启动DeepSeek-Harness.bat / 停止DeepSeek-Harness.bat   # 一键启停（GBK+CRLF 编码）
+├── 部署DeepSeek-Harness.bat   # 一键部署：拉取后环境审查与补足（幂等，可重复运行）
 ├── desktop\            # 托盘应用（main.cjs 看门狗+窗口、tray.png、package.json）
 ├── deepseek-harness\   # 上游仓库（git submodule，固定到经过验证的提交）
 ├── dsh-home\           # Harness home（本机数据，不入库；首次运行自动创建）
