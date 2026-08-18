@@ -241,6 +241,9 @@ const CONSOLE_MARKERS = {
   MAXIMIZE: 'DSH_DESKTOP_MAXIMIZE',
   CLOSE_WINDOW: 'DSH_DESKTOP_CLOSE_WINDOW',
   OPEN_SESSIONS: 'DSH_DESKTOP_OPEN_SESSIONS',
+  BACKUP: 'DSH_DESKTOP_BACKUP',
+  MIGRATE: 'DSH_DESKTOP_MIGRATE',
+  RESTORE: 'DSH_DESKTOP_RESTORE',
 }
 const OVERLAY_INJECT = `(() => {
   if (document.getElementById('dsh-desktop-overlay')) return
@@ -281,13 +284,19 @@ const OVERLAY_INJECT = `(() => {
   // 预备功能按钮区
   const toolbar = document.createElement('div')
   toolbar.id = 'dsh-desktop-toolbar'
-  const sessBtn = document.createElement('button')
-  sessBtn.id = 'dsh-desktop-open-sessions'
-  sessBtn.className = 'dsh-tool-btn'
-  sessBtn.title = '打开对话存档文件夹（dsh-home\\sessions）'
-  sessBtn.innerHTML = '<span style="font-size:14px">\\uD83D\\uDCC1</span> 打开会话存档'
-  sessBtn.onclick = () => console.log('DSH_DESKTOP_OPEN_SESSIONS')
-  toolbar.appendChild(sessBtn)
+  const mkTool = (id, titleText, html) => {
+    const b = document.createElement('button')
+    b.id = id
+    b.className = 'dsh-tool-btn'
+    b.title = titleText
+    b.innerHTML = html
+    b.onclick = () => console.log('DSH_DESKTOP_' + id.replace('dsh-desktop-', '').toUpperCase())
+    return b
+  }
+  toolbar.appendChild(mkTool('dsh-desktop-open-sessions', '打开对话存档文件夹（dsh-home\\sessions）', '<span style="font-size:14px">\\uD83D\\uDCC1</span> 打开会话存档'))
+  toolbar.appendChild(mkTool('dsh-desktop-backup', '将对话存档打包为 zip（可选保存位置）', '<span style="font-size:14px">\\uD83D\\uDCBE</span> 备份'))
+  toolbar.appendChild(mkTool('dsh-desktop-migrate', '将当前对话存档合并进既有备份 zip（迁移/增量更新）', '<span style="font-size:14px">\\uD83D\\uDCE4</span> 迁移'))
+  toolbar.appendChild(mkTool('dsh-desktop-restore', '从备份 zip 还原对话存档（当前会话自动留底可回退）', '<span style="font-size:14px">\\uD83D\\uDCE5</span> 恢复'))
   overlay.appendChild(toolbar)
   document.body.appendChild(overlay)
   // 让出空间而非覆盖：给页面内容加等量 padding-top，两栏悬于顶部不遮挡内容
@@ -320,7 +329,73 @@ function openSessionsFolder() {
   })
 }
 
+// —— 工作区备份/迁移/恢复（图形化选路径 + 复用 backup-restore.ps1）——
+const BACKUP_PS1 = path.join(ROOT_DIR, 'backup-restore.ps1')
+
+function defaultBackupName() {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return `dsh-sessions-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.zip`
+}
+
+async function pickZipPath(action) {
+  // 测试钩子：预设路径跳过对话框
+  if (process.env.DSH_DESKTOP_TEST_ZIP) return { path: process.env.DSH_DESKTOP_TEST_ZIP, canceled: false }
+  const parent = win && !win.isDestroyed() ? win : undefined
+  if (action === 'backup') {
+    const r = await dialog.showSaveDialog(parent, {
+      title: '选择备份文件保存位置',
+      defaultPath: path.join(app.getPath('documents'), defaultBackupName()),
+      filters: [{ name: 'Zip 备份', extensions: ['zip'] }],
+    })
+    return { path: r.filePath || '', canceled: r.canceled }
+  }
+  const r = await dialog.showOpenDialog(parent, {
+    title: action === 'restore' ? '选择要恢复的备份 zip' : '选择要更新的既有备份 zip',
+    filters: [{ name: 'Zip 备份', extensions: ['zip'] }],
+    properties: ['openFile'],
+  })
+  return { path: r.filePaths[0] || '', canceled: r.canceled }
+}
+
+function runBackupTool(action, zip) {
+  try {
+    const r = spawnSync(
+      path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', BACKUP_PS1, '-Action', action, '-ZipPath', zip],
+      { encoding: 'utf8', timeout: 300000, windowsHide: true },
+    )
+    const out = (((r.stdout || '') + (r.stderr || '')).trim().split(/\r?\n/).pop()) || '完成'
+    return { ok: r.status === 0, out }
+  } catch (e) {
+    return { ok: false, out: String(e && e.message || e) }
+  }
+}
+
+const backupInFlight = {} // 去重：2 秒窗口内同一操作只执行一次（防连击/事件双触发）
+async function handleBackupAction(action) {
+  if (backupInFlight[action]) return
+  backupInFlight[action] = true
+  try {
+    const { path: zip, canceled } = await pickZipPath(action)
+    if (canceled || !zip) return
+    slog(`backup action ${action} → ${zip}`)
+    const res = runBackupTool(action, zip)
+    wlog(`backup action ${action} ${res.ok ? 'OK' : 'FAIL'}: ${res.out}`)
+    if (process.env.DSH_DESKTOP_TEST_ZIP) return // 测试模式不弹结果框
+    await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: res.ok ? 'info' : 'error',
+      title: 'DeepSeek Harness',
+      message: res.ok ? '操作完成' : '操作失败',
+      detail: res.out,
+    })
+  } finally {
+    setTimeout(() => { backupInFlight[action] = false }, 2000)
+  }
+}
+
 function dispatchUiMessage(marker) {
+  slog(`dispatch marker received: ${marker}`)
   switch (marker) {
     case CONSOLE_MARKERS.QUIT:
       requestQuitFromUi()
@@ -339,6 +414,15 @@ function dispatchUiMessage(marker) {
       break
     case CONSOLE_MARKERS.OPEN_SESSIONS:
       openSessionsFolder()
+      break
+    case CONSOLE_MARKERS.BACKUP:
+      handleBackupAction('backup')
+      break
+    case CONSOLE_MARKERS.MIGRATE:
+      handleBackupAction('update')
+      break
+    case CONSOLE_MARKERS.RESTORE:
+      handleBackupAction('restore')
       break
   }
 }
@@ -460,6 +544,18 @@ async function openShellWindow() {
     quitting = true
     app.quit()
   }
+  if (process.env.DSH_DESKTOP_AUTOBACKUPTEST === '1') {
+    // 串行点击 备份→迁移→恢复（配合 DSH_DESKTOP_TEST_ZIP 跳过对话框）
+    await new Promise(r => setTimeout(r, 3000))
+    for (const id of ['dsh-desktop-backup', 'dsh-desktop-migrate', 'dsh-desktop-restore']) {
+      slog(`autobackuptest: clicking ${id}`)
+      await win.webContents.executeJavaScript(`document.getElementById('${id}')?.click()`)
+      await new Promise(r => setTimeout(r, 7000)) // 等待压缩/解压完成
+    }
+    slog('autobackuptest done, quitting')
+    quitting = true
+    app.quit()
+  }
   if (SMOKE) {
     await new Promise(r => setTimeout(r, 4000))
     const img = await win.webContents.capturePage()
@@ -471,6 +567,9 @@ async function openShellWindow() {
         .map((n) => 'dsh-desktop-' + n)
         .filter((id) => !!document.getElementById(id)).length
       out.openSessionsBtn = !!document.getElementById('dsh-desktop-open-sessions')
+      out.backupBtns = ['backup', 'migrate', 'restore']
+        .map((n) => 'dsh-desktop-' + n)
+        .filter((id) => !!document.getElementById(id)).length
       out.overlayHeight = document.body.dataset.dshOverlayH || '0'
       out.bodyPaddingTop = document.body.style.paddingTop
       out.geometry = (() => {
