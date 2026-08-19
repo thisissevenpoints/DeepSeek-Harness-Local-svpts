@@ -329,6 +329,7 @@ node --import "$TSX_URL" \
 25. **MSYS→node.exe 传参吃反斜杠**：`node -e "含 \ 的字符串"` 经 bash 传参后反斜杠被吞（曾把 `\n` 变成换行、路径分隔符丢失）。需含反斜杠的字符串操作时，用 Write 写 patch.js 文件执行（不经命令行参数）。
 26. **官方 CLI 硬拒 `--host 0.0.0.0`**（rc.7 实测）：报错 "intentionally not supported yet for safety: it would expose remote code execution to the network"；`--host 具体局域网 IP` 也会在 profile 加载阶段失败。局域网访问只能走壳内转发层（见 §6）。
 27. **手写 WS 代理的两个坑**：①客户端 upgrade 首包（`head`）必须 `p.write(head)` 转发给后端，否则握手后客户端帧丢失（ws 库 TIMEOUT）；②代理返回的 101 响应头必须以**完整空行** `\r\n\r\n` 结尾（curl 宽容可解析、ws 库严格解析会挂起）。另外 mkTool 按钮 id 必须与 CONSOLE_MARKERS 键名逐字对应（`lan` ≠ `LAN_TOGGLE`，曾导致点击无效）。
+28. **外部代码审查（Gemini）核对结论**：其"潜在隐患"多数不成立（taskkill /T /F、PowerShell Bypass、Token 授权均早已实现；`.env` 只有占位符无真 Key）。据此落实两项真实改进（2026-08-19）：①局域网授权 Cookie 加 `HttpOnly`（防页面 JS 窃取 token）；②看门狗 spawn 前 TCP 预探测 3180（外部进程占端口时不再无谓 spawn，`portInUse` 用 `net.connect` 探测；外部实例退出后自动接管，实测：占用时 spawn 0 次、释放后 2 秒自动拉起）。
 
 ## 9. 数据与日志位置
 

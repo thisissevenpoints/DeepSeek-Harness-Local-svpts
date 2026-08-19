@@ -23,6 +23,7 @@ if (!app) {
 }
 const { spawn, spawnSync } = require('node:child_process')
 const http = require('node:http')
+const net = require('node:net')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -130,6 +131,17 @@ function killOwnedBackend() {
   owned = false
 }
 
+// TCP 端口探测：连接成功 = 已被占用（可能是外部实例或哑进程）
+function portInUse(port) {
+  return new Promise((resolve) => {
+    const s = net.connect(port, '127.0.0.1')
+    const done = (v) => { try { s.destroy() } catch { /* ignore */ } resolve(v) }
+    s.on('connect', () => done(true))
+    s.on('error', () => done(false))
+    setTimeout(() => done(false), 1000)
+  })
+}
+
 function startDsh() {
   const out = fs.openSync(path.join(DIR, 'dsh-web.log'), 'a')
   if (IS_WIN) {
@@ -214,6 +226,13 @@ async function watchdogTick() {
     return
   }
   wlog(`backend unreachable (${failures}/${MAX_CONSECUTIVE_FAILURES}, ${probe.detail}), restarting...`)
+  // 重启前先探测端口：外部进程占用（如哑进程占 3180 但不响应 HTTP）时
+  // 不反复 spawn（bind 必失败），改为等待外部实例退出后自动接管
+  if (await portInUse(3180)) {
+    wlog('port 3180 busy by external process, waiting without spawn')
+    failures = 0 // 不计入失败，避免触发放弃上限
+    return
+  }
   killOwnedBackend()
   startDsh()
 }
@@ -680,7 +699,7 @@ async function lanHandleApply(req, res) {
   saveLanAuth(auth)
   try {
     res.writeHead(200, {
-      'Set-Cookie': `${LAN_COOKIE}=${token}; Path=/; Max-Age=31536000`,
+      'Set-Cookie': `${LAN_COOKIE}=${token}; Path=/; Max-Age=31536000; HttpOnly`, // HttpOnly：防页面 JS 窃取授权 token
       'Content-Type': 'text/html; charset=utf-8',
     })
     res.end('<script>location.href="/"</script>')
