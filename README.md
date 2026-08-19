@@ -14,7 +14,7 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 
 ### 自举安装（推荐，无需手动 clone）
 
-从仓库页面下载**单个文件** `install.bat`（Windows）或 `install.sh`（Linux/macOS）→ 放到任意目录运行 → 自动 clone 仓库（含子模块）并完成部署。**仓库内不含任何不可审查的二进制文件。**
+从仓库页面下载**单个文件** `install.bat`（Windows）或 `install.sh`（Linux/macOS）→ 放到任意目录运行 → **缺失的 git/node/pnpm 自动安装**（Windows 走 winget，Linux/macOS 走系统包管理器或 NodeSource/nvm）→ 自动 clone 仓库（含子模块）并完成部署。**仓库内不含任何不可审查的二进制文件。**
 
 ### 手动安装
 

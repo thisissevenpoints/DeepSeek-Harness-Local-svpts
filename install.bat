@@ -18,21 +18,36 @@ echo   DeepSeek Harness Local svpts 自举安装
 echo ==========================================
 echo.
 
-rem 1) 工具链自检
+rem 1) 工具链自检（缺失自动安装；安装后自动重启本脚本续跑，实现一次性全完成）
 %SystemRoot%\System32\where.exe git >nul 2>nul
 if errorlevel 1 (
-    echo [x] 未找到 git（请先安装 git：https://git-scm.com）
-    goto :FAIL
+    echo [!] 未找到 git，尝试自动安装……
+    winget install -e --id Git.Git --silent --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 (
+        echo [x] git 自动安装失败，请手动安装后重跑：https://git-scm.com
+        goto :FAIL
+    )
+    goto :RESTART
 )
 %SystemRoot%\System32\where.exe node >nul 2>nul
 if errorlevel 1 (
-    echo [x] 未找到 node（请先安装 Node.js 22 以上：https://nodejs.org）
-    goto :FAIL
+    echo [!] 未找到 node，尝试自动安装（Node.js LTS）……
+    winget install -e --id OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 (
+        echo [x] node 自动安装失败，请手动安装后重跑：https://nodejs.org
+        goto :FAIL
+    )
+    goto :RESTART
 )
 %SystemRoot%\System32\where.exe pnpm >nul 2>nul
 if errorlevel 1 (
-    echo [x] 未找到 pnpm（请先安装：npm install -g pnpm）
-    goto :FAIL
+    echo [!] 未找到 pnpm，尝试自动安装……
+    call npm install -g pnpm
+    if errorlevel 1 (
+        echo [x] pnpm 自动安装失败，请手动安装后重跑：npm install -g pnpm
+        goto :FAIL
+    )
+    goto :RESTART
 )
 echo [v] git / node / pnpm 就绪
 
@@ -73,3 +88,8 @@ echo.
 echo [x] 安装中止，请按提示处理后重跑本脚本。
 %SystemRoot%\System32\PING.EXE -n 6 127.0.0.1 >nul
 exit /b 1
+
+rem 自动安装完成：新开 cmd 进程（读取刷新后的 PATH）重跑本脚本
+:RESTART
+start "" cmd /c "call "%~f0""
+exit /b 0
