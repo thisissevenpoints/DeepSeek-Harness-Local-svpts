@@ -117,8 +117,14 @@ if not exist "%REPO%\node_modules\.pnpm" (
     cd /d "%REPO%"
     call pnpm install
     if errorlevel 1 (
-        echo   [x] pnpm install 失败
-        goto :FAIL
+        rem lefthook postinstall 在 submodule 下已知失败（worktreeConfig 冲突，仅影响开发 hooks）；依赖已装则宽容继续
+        if exist "%REPO%
+ode_modules.pnpm" (
+            echo   [!] pnpm install 部分脚本失败（lefthook hooks 跳过），依赖已就位，继续
+        ) else (
+            echo   [x] pnpm install 失败
+            goto :FAIL
+        )
     )
     echo   [v] 依赖已安装
 ) else (

@@ -10,6 +10,8 @@ rem ============================================================
 
 set "REPO_URL=https://github.com/thisissevenpoints/DeepSeek-Harness-Local-svpts.git"
 set "TARGET_DIR=DeepSeek-Harness-Local-svpts"
+set "TARGET_ABS=%~dp0%TARGET_DIR%"
+set "SEP=\"
 
 echo ==========================================
 echo   DeepSeek Harness Local svpts 自举安装
@@ -35,14 +37,14 @@ if errorlevel 1 (
 echo [v] git / node / pnpm 就绪
 
 rem 2) 目标目录冲突检查
-if exist "%TARGET_DIR%" (
-    echo [x] 目录 %TARGET_DIR% 已存在，请先移除或换目录运行本脚本。
+if exist "%TARGET_ABS%" (
+    echo [x] 目录 %TARGET_ABS% 已存在，请先移除或换目录运行本脚本。
     goto :FAIL
 )
 
 rem 3) clone 仓库（含 deepseek-harness 子模块）
 echo [1/2] 拉取仓库（含子模块，约 300MB，请耐心等待）……
-git clone --recurse-submodules "%REPO_URL%" "%TARGET_DIR%"
+git clone --recurse-submodules "%REPO_URL%" "%TARGET_ABS%"
 if errorlevel 1 (
     echo [x] clone 失败（检查网络后重试）
     goto :FAIL
@@ -51,8 +53,8 @@ echo [v] 仓库已就位
 
 rem 4) 自动部署（环境审查与补足）
 echo [2/2] 运行部署脚本（依赖安装 + 构建，约 3-10 分钟）……
-cd /d "%TARGET_DIR%"
-call deploy-win.bat
+cd /d "%TARGET_ABS%"
+call "%TARGET_ABS%%SEP%deploy-win.bat"
 if errorlevel 1 (
     echo [x] 部署失败，请查看上方提示。
     goto :FAIL
@@ -60,7 +62,7 @@ if errorlevel 1 (
 
 echo ==========================================
 echo   安装完成！
-echo   启动：双击 %TARGET_DIR%\启动DeepSeek-Harness.bat
+echo   启动：双击 %TARGET_ABS%%SEP%启动DeepSeek-Harness.bat
 echo   说明：README.md（使用）、HANDOVER.md（运维）
 echo ==========================================
 %SystemRoot%\System32\PING.EXE -n 6 127.0.0.1 >nul

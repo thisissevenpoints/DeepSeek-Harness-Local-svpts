@@ -52,7 +52,7 @@ fi
 
 echo "[5/6] 依赖与构建……"
 if [ ! -d "$REPO/node_modules/.pnpm" ]; then
-  (cd "$REPO" && pnpm install)
+  (cd "$REPO" && pnpm install) || { [ -d "$REPO/node_modules/.pnpm" ] && echo "  [!] pnpm install 部分脚本失败（lefthook hooks 跳过），依赖已就位，继续" || { echo "  [x] pnpm install 失败"; exit 1; }; }
   echo "  [v] 依赖已安装"
 else
   echo "  [v] 依赖已存在"
