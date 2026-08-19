@@ -58,7 +58,7 @@ else
   echo "  [v] 依赖已存在"
 fi
 if [ ! -d "$REPO/apps/web/dist" ]; then
-  (cd "$REPO" && pnpm run build)
+  (cd "$REPO" && pnpm --config.verifyDepsBeforeRun=false run build)
   echo "  [v] 构建完成"
 else
   echo "  [v] 构建产物已存在"

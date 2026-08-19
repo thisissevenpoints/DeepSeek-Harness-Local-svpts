@@ -132,7 +132,8 @@ if not exist "%REPO%\node_modules\.pnpm" (
 if not exist "%REPO%\apps\web\dist" (
     echo   构建（pnpm run build，约 1-3 分钟）……
     cd /d "%REPO%"
-    call pnpm run build
+    rem lefthook 等 postinstall 在 submodule 下可能失败导致 deps 状态不完整，build 前跳过该校验
+    call pnpm --config.verifyDepsBeforeRun=false run build
     if errorlevel 1 (
         echo   [x] 构建失败
         goto :FAIL
