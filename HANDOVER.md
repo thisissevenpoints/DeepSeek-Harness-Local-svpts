@@ -198,6 +198,8 @@ OLLAMA_PLACEHOLDER_KEY=ollama
   - 执行引擎复用 `backup-restore.ps1`（主进程 `dialog` 选路径 → **异步** PowerShell，不阻塞主进程）；完成弹结果框；全局互斥锁防并发；
 - **让出空间而非覆盖**：注入后量取两栏实际高度（约 83px），给页面 body 加等量 `padding-top`，内容从两栏下方开始、零遮挡（烟测几何验证 `overlap:false`）。
 - 通知机制：**console 标记分派**（页面 `console.log('DSH_DESKTOP_*')` → 壳 `console-message` 必然送达，主通道）+ 自定义协议导航兜底（仅退出按钮保留双通道、带去重）。
+- **弹层避让**（2026-08-19）：dsh 前端弹层类名为 CSS-in-JS 生成（如 `YngKKa_overlay`），注入通用规则 `[class*="_overlay"]{top:var(--dsh-overlay-h)}`（--dsh-overlay-h = 两栏实际高度），设置等弹窗不再被顶栏/功能栏压住；
+- **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 3180` + `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `v0.1.0`；body padding-bottom 让位（29px）；
 - 页面每次加载（含自动重载循环）后自动重新注入；loading/错误页（data:）不注入；
 4. 冒烟诊断含 `quitBtn` 字段（注入成功与否）。
 
@@ -318,6 +320,10 @@ node --import "$TSX_URL" \
 19. **进程树清理双保险**：taskkill `/T` 可能漏杀脱离进程树的孙进程（实际监听 3180 的 dsh 节点），必须再按 `netstat` 监听 PID 兜底一次；停止脚本的"清理残留实例"行即使已清理也可能出现（netstat 行滞后，无害）。mise shim 启动的 node 进程会显示两个（shim 包装 + 真实进程），属正常。
 20. **Electron 的 ELECTRON_RUN_AS_NODE 陷阱**：值为 `1` **或空字符串**都会进入纯 Node 模式（`app` 为 undefined）！cmd 的 `set "VAR="` 传给子进程时行为不稳定（有时剥除、有时传空串），启动脚本必须用 PowerShell `$env:VAR = $null` **彻底删除**该变量（$null 保证子进程环境无此变量）；MSYS bash 的 `VAR= cmd` 会原样传空串，测试时注意。另外 **必须订阅 `window-all-closed`**，否则 Electron 默认关窗即退出、托盘消失。
 21. **退出竞态防护**：应用退出路径（停止信号/托盘菜单/烟测）必须先置 `quitting` 标志再杀后台，否则退出前的最后一个巡检 tick 会把刚杀掉的实例误判为"崩溃"重新拉起，留下孤儿进程。
+22. **模板字符串（反引号）里 `\s` 会被 JS 解析成 `s`**（非法转义丢弃反斜杠）：烟测诊断/注入脚本里的正则 `/\s+/g` 实际变成 `/s+/g`（把所有字母 s 折叠成空格！）。模板字符串内正则须写 `\\s`。
+23. **`NoDefaultCurrentDirectoryInExePath=1` 环境变量**（本机存在）：cmd **不搜索当前目录**，bat 内相对名 `call`/执行一律失败（"不是内部或外部命令"）。所有 bat 内跨目录调用必须用绝对路径（`%~dp0` 推导 + `SEP` 变量拼接）。
+24. **submodule 下 dsh 的 lefthook postinstall 失败**（`extensions.worktreeConfig` 冲突，仅影响开发 hooks）：`pnpm install` 会因此报错。部署脚本已宽容处理（依赖已装则继续），且 `pnpm run build` 需加 `--config.verifyDepsBeforeRun=false`（install 部分失败后 pnpm 会拒绝 build）。
+25. **MSYS→node.exe 传参吃反斜杠**：`node -e "含 \ 的字符串"` 经 bash 传参后反斜杠被吞（曾把 `\n` 变成换行、路径分隔符丢失）。需含反斜杠的字符串操作时，用 Write 写 patch.js 文件执行（不经命令行参数）。
 
 ## 9. 数据与日志位置
 

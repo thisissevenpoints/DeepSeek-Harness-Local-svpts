@@ -284,6 +284,13 @@ const OVERLAY_INJECT = `(() => {
   style.textContent += '#dsh-desktop-toolbar{display:flex;align-items:center;gap:8px;padding:6px 12px;background:rgba(17,24,39,.72);border-bottom:1px solid rgba(255,255,255,.08)}'
   style.textContent += '.dsh-tool-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid rgba(255,255,255,.22);border-radius:6px;background:rgba(255,255,255,.06);color:#e5e7eb;font-size:12px;cursor:pointer;transition:background .15s}'
   style.textContent += '.dsh-tool-btn:hover{background:rgba(255,255,255,.16)}'
+  style.textContent += '#dsh-desktop-statusbar{position:fixed;bottom:0;left:0;right:0;height:28px;z-index:2147483646;display:flex;align-items:center;gap:16px;padding:0 12px;background:rgba(17,24,39,.88);color:#9ca3af;font-size:11px;border-top:1px solid rgba(255,255,255,.08);font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif}'
+  style.textContent += '#dsh-desktop-statusbar b{color:#d1d5db;font-weight:600}'
+  style.textContent += '#dsh-desktop-statusbar .st-dot{width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;margin-right:5px;vertical-align:1px}'
+  style.textContent += '#dsh-desktop-statusbar .st-dot.off{background:#ef4444}'
+  style.textContent += '#dsh-desktop-statusbar .st-spacer{flex:1}'
+  // 弹层避让：dsh 前端弹层类名为 CSS-in-JS 生成（如 YngKKa_overlay），通用规则让其让出顶栏高度
+  style.textContent += '[class*="_overlay"]{top:var(--dsh-overlay-h,83px)!important}'
   document.head.appendChild(style)
   const overlay = document.createElement('div')
   overlay.id = 'dsh-desktop-overlay'
@@ -327,18 +334,60 @@ const OVERLAY_INJECT = `(() => {
   toolbar.appendChild(mkTool('dsh-desktop-restore', '从备份 zip 还原对话存档（当前会话自动留底可回退）', '<span style="font-size:14px">\\uD83D\\uDCE5</span> 恢复'))
   overlay.appendChild(toolbar)
   document.body.appendChild(overlay)
-  // 让出空间而非覆盖：给页面内容加等量 padding-top，两栏悬于顶部不遮挡内容
+  // 底部状态栏：后端在线状态（页面内轮询）/ 端口 / 工作区路径 / 版本
+  // 全部用 textContent 赋值，避免 HTML/JS 字符串转义问题（路径含反斜杠）
+  const statusbar = document.createElement('div')
+  statusbar.id = 'dsh-desktop-statusbar'
+  const mkSpan = (text) => { const s = document.createElement('span'); s.textContent = text; return s }
+  const st = document.createElement('span')
+  const dot = document.createElement('span'); dot.className = 'st-dot'
+  const backendText = document.createElement('span'); backendText.className = 'st-backend'; backendText.textContent = '检测中…'
+  st.appendChild(dot); st.appendChild(backendText)
+  statusbar.appendChild(st)
+  const portSpan = document.createElement('span')
+  portSpan.append('端口 '); const portB = document.createElement('b'); portB.textContent = '__WEB_PORT__'; portSpan.appendChild(portB)
+  statusbar.appendChild(portSpan)
+  const homeSpan = document.createElement('span')
+  homeSpan.append('工作区 '); const homeB = document.createElement('b'); homeB.className = 'st-home'; homeB.textContent = '…'; homeSpan.appendChild(homeB)
+  statusbar.appendChild(homeSpan)
+  const spacer = document.createElement('span'); spacer.className = 'st-spacer'
+  statusbar.appendChild(spacer)
+  statusbar.appendChild(mkSpan('v__APP_VERSION__'))
+  document.body.appendChild(statusbar)
+  const checkBackend = async () => {
+    const ok = await fetch('http://127.0.0.1:__WEB_PORT__').then(() => true).catch(() => false)
+    const dot = statusbar.querySelector('.st-dot')
+    dot.className = 'st-dot' + (ok ? '' : ' off')
+    statusbar.querySelector('.st-backend').textContent = ok ? '后端在线' : '后端离线'
+  }
+  checkBackend()
+  setInterval(checkBackend, 5000)
+  // 让出空间而非覆盖：给页面内容加等量 padding，两栏悬于顶部、状态栏贴底，均不遮挡内容
   const h = overlay.offsetHeight
+  const sb = statusbar.offsetHeight
+  overlay.style.setProperty('--dsh-overlay-h', h + 'px')
   document.body.style.paddingTop = h + 'px'
+  document.body.style.paddingBottom = sb + 'px'
   document.body.style.boxSizing = 'border-box'
   document.body.dataset.dshOverlayH = String(h)
 })()`
+
+const WEB_PORT = new URL(WEB_URL).port
+const APP_VERSION = '0.1.0' // 与 desktop/package.json 同步
 
 function injectOverlay(w) {
   if (!w || w.isDestroyed()) return
   const url = w.webContents.getURL()
   if (!url.startsWith('http')) return // loading/错误页（data:）不注入
-  w.webContents.executeJavaScript(OVERLAY_INJECT).catch(() => { /* 注入尽力而为 */ })
+  const script = OVERLAY_INJECT
+    .replaceAll('__WEB_PORT__', WEB_PORT)
+    .replaceAll('__APP_VERSION__', APP_VERSION)
+  w.webContents.executeJavaScript(script)
+    .then(() => w.webContents.executeJavaScript(
+      // JSON.stringify 生成合法 JS 字符串字面量（自动转义反斜杠），标准传值方式
+      `document.querySelector('#dsh-desktop-statusbar .st-home')?.replaceChildren(document.createTextNode(${JSON.stringify(DSH_HOME_DIR)}))`,
+    ))
+    .catch(() => { /* 注入尽力而为 */ })
 }
 
 function requestQuitFromUi() {
@@ -666,6 +715,30 @@ async function openShellWindow() {
     quitting = true
     app.quit()
   }
+  if (process.env.DSH_DESKTOP_PROBESETTINGS === '1') {
+    // 诊断钩子：点击"设置"并收集弹层 DOM 类名（用于修复弹层被顶栏遮挡）
+    await new Promise(r => setTimeout(r, 3000))
+    slog('probesettings: clicking settings')
+    await win.webContents.executeJavaScript(`(() => {
+      const els = [...document.querySelectorAll('*')].filter(e => e.textContent && e.textContent.trim() === '设置' && e.children.length === 0)
+      if (els[0]) els[0].click()
+      return els.length
+    })()`)
+    await new Promise(r => setTimeout(r, 2500))
+    const probes = await win.webContents.executeJavaScript(`(() => {
+      const out = []
+      for (const el of document.querySelectorAll('body *')) {
+        const s = getComputedStyle(el)
+        if (s.position === 'fixed' && el.offsetWidth > 100 && el.offsetHeight > 50) {
+          out.push((el.className || el.id || el.tagName).toString().slice(0, 80))
+        }
+      }
+      return JSON.stringify(out.slice(0, 12))
+    })()`)
+    slog(`probesettings: fixed layers = ${probes}`)
+    quitting = true
+    app.quit()
+  }
   if (process.env.DSH_DESKTOP_AUTOMIGRATETEST === '1') {
     // 点击迁移按钮（配合 DSH_DESKTOP_TEST_MIGRATE_TO 预设目标目录跳过对话框）
     await new Promise(r => setTimeout(r, 3000))
@@ -694,6 +767,11 @@ async function openShellWindow() {
       out.backupBtns = ['backup', 'migrate', 'update', 'restore']
         .map((n) => 'dsh-desktop-' + n)
         .filter((id) => !!document.getElementById(id)).length
+      out.statusbar = !!document.getElementById('dsh-desktop-statusbar')
+      out.homeFromMain = ${JSON.stringify(DSH_HOME_DIR)}
+      out.homeFromDom = document.querySelector('#dsh-desktop-statusbar .st-home')?.textContent || ''
+      out.statusText = document.getElementById('dsh-desktop-statusbar')?.textContent.slice(0, 120) || ''
+      out.bodyPaddingBottom = document.body.style.paddingBottom
       out.overlayHeight = document.body.dataset.dshOverlayH || '0'
       out.bodyPaddingTop = document.body.style.paddingTop
       out.geometry = (() => {
