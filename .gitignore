@@ -24,3 +24,4 @@ dsh-test/install-e2e-result.txt
 
 # —— 设计参考项目（本地拉取，不入库）——
 references/
+desktop/lan-auth.json

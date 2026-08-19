@@ -199,7 +199,8 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 - **让出空间而非覆盖**：注入后量取两栏实际高度（约 83px），给页面 body 加等量 `padding-top`，内容从两栏下方开始、零遮挡（烟测几何验证 `overlap:false`）。
 - 通知机制：**console 标记分派**（页面 `console.log('DSH_DESKTOP_*')` → 壳 `console-message` 必然送达，主通道）+ 自定义协议导航兜底（仅退出按钮保留双通道、带去重）。
 - **弹层避让**（2026-08-19）：dsh 前端弹层类名为 CSS-in-JS 生成（如 `YngKKa_overlay`），注入通用规则 `[class*="_overlay"]{top:var(--dsh-overlay-h)}`（--dsh-overlay-h = 两栏实际高度），设置等弹窗不再被顶栏/功能栏压住；
-- **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 3180` + `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `v0.1.0`；body padding-bottom 让位（29px）；
+- **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 3180` + `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `局域网 开/关`（主进程推送）+ `v0.1.0`；body padding-bottom 让位（29px）；
+- **局域网转发 + 确认鉴权**（2026-08-19，不修改 harness）：功能按钮区 `🌐 局域网` 开关 → 主进程起 `0.0.0.0:3280` 反向代理（HTTP + WebSocket 双转发）到 `127.0.0.1:3180`。**默认关闭**；开启后局域网设备访问先见"申请页"（大按钮）→ 电脑端弹确认框 → 授权后下发持久 Cookie（`desktop\lan-auth.json` 记录设备，**已 gitignore**）→ 局域网状态不变则确权不失效；删除该文件即一键撤销。官方 CLI 硬性拒绝 `--host 0.0.0.0`（RCE 风险声明），此方案绕开且保持"人类确认"安全边界；
 - 页面每次加载（含自动重载循环）后自动重新注入；loading/错误页（data:）不注入；
 4. 冒烟诊断含 `quitBtn` 字段（注入成功与否）。
 
@@ -324,6 +325,8 @@ node --import "$TSX_URL" \
 23. **`NoDefaultCurrentDirectoryInExePath=1` 环境变量**（本机存在）：cmd **不搜索当前目录**，bat 内相对名 `call`/执行一律失败（"不是内部或外部命令"）。所有 bat 内跨目录调用必须用绝对路径（`%~dp0` 推导 + `SEP` 变量拼接）。
 24. **submodule 下 dsh 的 lefthook postinstall 失败**（`extensions.worktreeConfig` 冲突，仅影响开发 hooks）：`pnpm install` 会因此报错。部署脚本已宽容处理（依赖已装则继续），且 `pnpm run build` 需加 `--config.verifyDepsBeforeRun=false`（install 部分失败后 pnpm 会拒绝 build）。
 25. **MSYS→node.exe 传参吃反斜杠**：`node -e "含 \ 的字符串"` 经 bash 传参后反斜杠被吞（曾把 `\n` 变成换行、路径分隔符丢失）。需含反斜杠的字符串操作时，用 Write 写 patch.js 文件执行（不经命令行参数）。
+26. **官方 CLI 硬拒 `--host 0.0.0.0`**（rc.7 实测）：报错 "intentionally not supported yet for safety: it would expose remote code execution to the network"；`--host 具体局域网 IP` 也会在 profile 加载阶段失败。局域网访问只能走壳内转发层（见 §6）。
+27. **手写 WS 代理的两个坑**：①客户端 upgrade 首包（`head`）必须 `p.write(head)` 转发给后端，否则握手后客户端帧丢失（ws 库 TIMEOUT）；②代理返回的 101 响应头必须以**完整空行** `\r\n\r\n` 结尾（curl 宽容可解析、ws 库严格解析会挂起）。另外 mkTool 按钮 id 必须与 CONSOLE_MARKERS 键名逐字对应（`lan` ≠ `LAN_TOGGLE`，曾导致点击无效）。
 
 ## 9. 数据与日志位置
 

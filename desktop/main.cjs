@@ -22,6 +22,8 @@ if (!app) {
   process.exit(1)
 }
 const { spawn, spawnSync } = require('node:child_process')
+const http = require('node:http')
+const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 
@@ -271,6 +273,7 @@ const CONSOLE_MARKERS = {
   UPDATE: 'DSH_DESKTOP_UPDATE', // 备份更新：合并进既有备份
   MIGRATE: 'DSH_DESKTOP_MIGRATE', // 迁移：工作区换位置并搬文件
   RESTORE: 'DSH_DESKTOP_RESTORE',
+  LAN_TOGGLE: 'DSH_DESKTOP_LAN_TOGGLE', // 局域网转发开关
 }
 const OVERLAY_INJECT = `(() => {
   if (document.getElementById('dsh-desktop-overlay')) return
@@ -332,6 +335,7 @@ const OVERLAY_INJECT = `(() => {
   toolbar.appendChild(mkTool('dsh-desktop-migrate', '工作区迁移：选择新位置并把整个工作区（dsh-home）搬过去', '<span style="font-size:14px">\\uD83D\\uDCE4</span> 迁移'))
   toolbar.appendChild(mkTool('dsh-desktop-update', '备份更新：将当前对话存档合并进既有备份 zip', '<span style="font-size:14px">\\uD83D\\uDD04</span> 备份更新'))
   toolbar.appendChild(mkTool('dsh-desktop-restore', '从备份 zip 还原对话存档（当前会话自动留底可回退）', '<span style="font-size:14px">\\uD83D\\uDCE5</span> 恢复'))
+  toolbar.appendChild(mkTool('dsh-desktop-lan-toggle', '局域网转发开关：局域网设备经确认后可访问本机（3280→3180）', '<span style="font-size:14px">\\uD83C\\uDF10</span> 局域网'))
   overlay.appendChild(toolbar)
   document.body.appendChild(overlay)
   // 底部状态栏：后端在线状态（页面内轮询）/ 端口 / 工作区路径 / 版本
@@ -352,8 +356,16 @@ const OVERLAY_INJECT = `(() => {
   statusbar.appendChild(homeSpan)
   const spacer = document.createElement('span'); spacer.className = 'st-spacer'
   statusbar.appendChild(spacer)
+  const lanSpan = document.createElement('span')
+  lanSpan.append('局域网 '); const lanB = document.createElement('b'); lanB.className = 'st-lan'; lanB.textContent = '关'; lanSpan.appendChild(lanB)
+  statusbar.appendChild(lanSpan)
   statusbar.appendChild(mkSpan('v__APP_VERSION__'))
   document.body.appendChild(statusbar)
+  // 主进程推送局域网状态（toggle 后调用）
+  window.dshUpdateLan = (state) => {
+    const el = document.querySelector('#dsh-desktop-statusbar .st-lan')
+    if (el) { el.textContent = state === 'on' ? '开' : '关'; el.style.color = state === 'on' ? '#22c55e' : '#9ca3af' }
+  }
   const checkBackend = async () => {
     const ok = await fetch('http://127.0.0.1:__WEB_PORT__').then(() => true).catch(() => false)
     const dot = statusbar.querySelector('.st-dot')
@@ -550,6 +562,157 @@ async function migrateWorkspace() {
   }
 }
 
+// —— 局域网转发 + 确认鉴权（不修改 harness；0.0.0.0:3280 → 127.0.0.1:3180）——
+// 设计：默认关闭；开启后局域网设备访问转发端口先见"申请页"→ 电脑端弹确认 → 授权
+// 后下发持久 Cookie（lan-auth.json 记录），局域网状态不变则确权不失效。可一键撤销。
+const LAN_PORT = 3280
+const LAN_COOKIE = 'dsh_lan_auth'
+const LAN_AUTH_FILE = path.join(DIR, 'lan-auth.json')
+let lanServer = null
+
+const LAN_APPLY_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>DeepSeek Harness 局域网访问</title>
+<style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#111827;color:#e5e7eb}
+.box{text-align:center;max-width:420px}.btn{display:inline-block;margin-top:20px;padding:14px 32px;font-size:16px;border:none;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer}
+.msg{margin-top:14px;font-size:13px;color:#9ca3af}</style></head>
+<body><div class="box"><h2>DeepSeek Harness</h2>
+<p style="font-size:14px;color:#d1d5db">这是一台局域网内的 DeepSeek Harness。</p>
+<p style="font-size:13px;color:#9ca3af">首次访问需要电脑端确认授权。</p>
+<button class="btn" id="apply">申请访问</button>
+<div class="msg" id="msg"></div></div>
+<script>document.getElementById('apply').onclick = async () => {
+  const m = document.getElementById('msg')
+  m.textContent = '已发送申请，请等待电脑端确认……'
+  const r = await fetch('/__lan_apply', { method: 'POST' })
+  if (r.ok) location.href = '/' + location.search
+  else m.textContent = '申请被拒绝'
+}</script></body></html>`
+
+function loadLanAuth() {
+  try { return JSON.parse(fs.readFileSync(LAN_AUTH_FILE, 'utf8')) } catch { return { devices: [] } }
+}
+function saveLanAuth(a) {
+  try { fs.writeFileSync(LAN_AUTH_FILE, JSON.stringify(a, null, 2)) } catch (e) { wlog(`lan-auth save failed: ${e && e.message || e}`) }
+}
+function lanTokenFrom(req) {
+  const c = req.headers.cookie || ''
+  const m = c.match(new RegExp(LAN_COOKIE + '=([^;]+)'))
+  return m ? m[1] : null
+}
+function lanAuthorized(req) {
+  const t = lanTokenFrom(req)
+  if (!t) return false
+  return loadLanAuth().devices.some((d) => d.token === t)
+}
+
+function proxyHttp(req, res) {
+  const headers = { ...req.headers, host: '127.0.0.1:3180' }
+  delete headers.cookie // 转发层 Cookie 不传给 dsh（dsh 不认）
+  const p = http.request({ host: '127.0.0.1', port: 3180, path: req.url, method: req.method, headers }, (pres) => {
+    res.writeHead(pres.statusCode, pres.headers)
+    pres.pipe(res)
+  })
+  p.on('error', () => { try { res.writeHead(502); res.end('Bad Gateway') } catch { /* ignore */ } })
+  req.pipe(p)
+}
+
+function proxyUpgrade(req, socket, head) {
+  const p = http.request({
+    host: '127.0.0.1', port: 3180, path: req.url,
+    headers: { ...req.headers, host: '127.0.0.1:3180' },
+  })
+  p.on('upgrade', (pres, psocket, phead) => {
+    const lines = ['HTTP/1.1 101 Switching Protocols']
+    for (const [k, v] of Object.entries(pres.headers)) {
+      if (k.toLowerCase() === 'connection' || k.toLowerCase() === 'upgrade') continue
+      lines.push(`${k}: ${v}`)
+    }
+    lines.push('Connection: Upgrade', 'Upgrade: websocket', '')
+    socket.write(lines.join('\r\n') + '\r\n') // 头结束需完整空行 \r\n\r\n（ws 库严格解析）
+    if (phead && phead.length) psocket.unshift(phead)
+    psocket.pipe(socket); socket.pipe(psocket)
+  })
+  p.on('error', () => { try { socket.destroy() } catch { /* ignore */ } })
+  if (head && head.length) p.write(head) // 客户端 upgrade 首包必须转发给后端
+  p.end()
+}
+
+async function lanHandleApply(req, res) {
+  const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
+  let approved = false
+  if (process.env.DSH_DESKTOP_LAN_AUTOAPPROVE === '1') {
+    approved = true // 测试钩子：跳过确认框
+  } else {
+    const { response } = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'question',
+      buttons: ['允许', '拒绝'],
+      defaultId: 1, cancelId: 1,
+      title: '局域网访问申请',
+      message: `设备 ${ip} 申请访问 DeepSeek Harness`,
+      detail: '允许后该设备可浏览并操作本机 agent（工作区写入权限）。',
+    })
+    approved = response === 0
+    if (approved) slog(`lan: approved ${ip}`)
+  }
+  if (!approved) { try { res.writeHead(403); res.end('denied') } catch { /* ignore */ } return }
+  const token = crypto.randomBytes(16).toString('hex')
+  const auth = loadLanAuth()
+  auth.devices = auth.devices.filter((d) => d.ip !== ip) // 同一设备重新授权则替换
+  auth.devices.push({ token, ip, at: new Date().toISOString() })
+  saveLanAuth(auth)
+  try {
+    res.writeHead(200, {
+      'Set-Cookie': `${LAN_COOKIE}=${token}; Path=/; Max-Age=31536000`,
+      'Content-Type': 'text/html; charset=utf-8',
+    })
+    res.end('<script>location.href="/"</script>')
+  } catch { /* ignore */ }
+}
+
+function startLanProxy() {
+  if (lanServer) return
+  lanServer = http.createServer((req, res) => {
+    if (lanAuthorized(req)) { proxyHttp(req, res); return }
+    if (req.url === '/__lan_apply' && req.method === 'POST') { lanHandleApply(req, res); return }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(LAN_APPLY_PAGE)
+  })
+  lanServer.on('upgrade', (req, socket, head) => {
+    if (lanAuthorized(req)) proxyUpgrade(req, socket, head)
+    else { try { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy() } catch { /* ignore */ } }
+  })
+  lanServer.on('error', (e) => wlog(`LAN proxy error: ${e && e.message || e}`))
+  lanServer.listen(LAN_PORT, '0.0.0.0', () => {
+    wlog(`LAN proxy listening on 0.0.0.0:${LAN_PORT} (→ ${WEB_URL})`)
+    pushLanStatus(true)
+  })
+}
+
+function pushLanStatus(on) {
+  if (!win || win.isDestroyed()) return
+  win.webContents.executeJavaScript(
+    `window.dshUpdateLan && window.dshUpdateLan(${on ? "'on'" : "'off'"})`,
+  ).catch(() => { /* 页面未就绪时忽略 */ })
+}
+
+function toggleLanProxy() {
+  if (lanServer) {
+    try { lanServer.close() } catch { /* ignore */ }
+    lanServer = null
+    wlog('LAN proxy stopped')
+    pushLanStatus(false)
+  } else {
+    startLanProxy()
+    // 防火墙提示（开启时提醒；管理员权限下 netsh 可自动放行，此处仅提示）
+    const { shell } = require('electron')
+    dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'info',
+      title: '局域网转发已开启',
+      message: `已监听 0.0.0.0:${LAN_PORT}（转发到本机 dsh）`,
+      detail: '手机/其他设备访问 http://<本机局域网IP>:3280 会先看到申请页，电脑端确认后即可使用。\n如设备无法连接，请在防火墙放行 TCP 3280 入站。',
+    }).catch(() => { /* ignore */ })
+  }
+}
+
 function dispatchUiMessage(marker) {
   slog(`dispatch marker received: ${marker}`)
   switch (marker) {
@@ -582,6 +745,9 @@ function dispatchUiMessage(marker) {
       break
     case CONSOLE_MARKERS.RESTORE:
       handleBackupAction('restore')
+      break
+    case CONSOLE_MARKERS.LAN_TOGGLE:
+      toggleLanProxy()
       break
   }
 }
@@ -736,6 +902,16 @@ async function openShellWindow() {
       return JSON.stringify(out.slice(0, 12))
     })()`)
     slog(`probesettings: fixed layers = ${probes}`)
+    quitting = true
+    app.quit()
+  }
+  if (process.env.DSH_DESKTOP_AUTOCLICKLAN === '1') {
+    // 局域网转发测试钩子：点击 LAN 开关开启转发，保持 45 秒供外部脚本测试后退出
+    await new Promise(r => setTimeout(r, 3000))
+    slog('autoclicklan: clicking LAN toggle')
+    await win.webContents.executeJavaScript(`document.getElementById('dsh-desktop-lan-toggle')?.click()`)
+    await new Promise(r => setTimeout(r, 45000))
+    slog('autoclicklan done, quitting')
     quitting = true
     app.quit()
   }
