@@ -10,6 +10,12 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 
 ## 快速开始
 
+### 自举安装（推荐，无需手动 clone）
+
+从仓库页面下载**单个文件** `install.bat`（Windows）或 `install.sh`（Linux/macOS）→ 放到任意目录运行 → 自动 clone 仓库（含子模块）并完成部署。**仓库内不含任何不可审查的二进制文件。**
+
+### 手动安装
+
 ```bat
 :: 第一步（git 拉取后只需一次，可重复运行）：双击 部署DeepSeek-Harness.bat
 ::   自动审查 Node/pnpm/git/Ollama，补足 dsh-home/.env、初始化子模块、安装依赖并构建
@@ -43,6 +49,8 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 ├── 启动DeepSeek-Harness.bat / 停止DeepSeek-Harness.bat   # 一键启停（GBK+CRLF 编码）
 ├── 部署DeepSeek-Harness.bat   # 一键部署：拉取后环境审查与补足（幂等，可重复运行）
 ├── 备份恢复DeepSeek-Harness.bat + backup-restore.ps1      # 对话存档备份/恢复/更新（PowerShell 内置压缩，零依赖）
+├── install.bat / install.sh   # 自举安装器（单文件下载即装，见"快速开始"）
+├── references\         # 设计参考项目（本地拉取，已被 .gitignore 排除，不入库）
 ├── desktop\            # 托盘应用（main.cjs 看门狗+窗口、tray.png、package.json）
 ├── deepseek-harness\   # 上游仓库（git submodule，固定到经过验证的提交）
 ├── dsh-home\           # Harness home（本机数据，不入库；首次运行自动创建）

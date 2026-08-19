@@ -37,6 +37,8 @@
 ├── 停止DeepSeek-Harness.bat      # 一键停止（托盘应用+后台服务；双击；优雅信号+端口兜底）
 ├── 部署DeepSeek-Harness.bat      # 一键部署（git 拉取后环境审查与补足：Node/pnpm/git/Ollama 审查、dsh-home/.env 补足、子模块初始化、依赖构建、Electron；幂等可重跑）
 ├── 备份恢复DeepSeek-Harness.bat + backup-restore.ps1  # 对话存档备份/恢复/更新（PowerShell 内置 Compress-Archive，零依赖；见 §13）
+├── install.bat / install.sh  # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
+├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
 ├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.0-rc.5）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）

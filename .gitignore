@@ -19,3 +19,4 @@ Thumbs.db
 .DS_Store
 dsh-test/stability-check/
 dsh-test/*.zip
+dsh-test/install-e2e/
