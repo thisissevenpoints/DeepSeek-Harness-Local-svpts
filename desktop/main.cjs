@@ -359,6 +359,9 @@ const OVERLAY_INJECT = `(() => {
   const lanSpan = document.createElement('span')
   lanSpan.append('局域网 '); const lanB = document.createElement('b'); lanB.className = 'st-lan'; lanB.textContent = '关'; lanSpan.appendChild(lanB)
   statusbar.appendChild(lanSpan)
+  const ipSpan = document.createElement('span')
+  ipSpan.append('本机 '); const ipB = document.createElement('b'); ipB.className = 'st-ip'; ipB.textContent = '…'; ipSpan.appendChild(ipB)
+  statusbar.appendChild(ipSpan)
   statusbar.appendChild(mkSpan('v__APP_VERSION__'))
   document.body.appendChild(statusbar)
   // 主进程推送局域网状态（toggle 后调用）
@@ -387,6 +390,21 @@ const OVERLAY_INJECT = `(() => {
 const WEB_PORT = new URL(WEB_URL).port
 const APP_VERSION = '0.1.0' // 与 desktop/package.json 同步
 
+// 本机局域网 IP（状态栏显示用）：取第一个非内部 IPv4，优先常见局域网段
+function getLanIp() {
+  const { networkInterfaces } = require('node:os')
+  const addrs = []
+  for (const list of Object.values(networkInterfaces())) {
+    for (const a of list || []) {
+      if (a.family === 'IPv4' && !a.internal) addrs.push(a.address)
+    }
+  }
+  if (!addrs.length) return ''
+  // 优先 192.168.x / 10.x / 172.16-31.x，否则取第一个
+  const prio = addrs.find((ip) => /^192\.168\./.test(ip) || /^10\./.test(ip) || /^172\.(1[6-9]|2\d|3[01])\./.test(ip))
+  return prio || addrs[0]
+}
+
 function injectOverlay(w) {
   if (!w || w.isDestroyed()) return
   const url = w.webContents.getURL()
@@ -397,7 +415,8 @@ function injectOverlay(w) {
   w.webContents.executeJavaScript(script)
     .then(() => w.webContents.executeJavaScript(
       // JSON.stringify 生成合法 JS 字符串字面量（自动转义反斜杠），标准传值方式
-      `document.querySelector('#dsh-desktop-statusbar .st-home')?.replaceChildren(document.createTextNode(${JSON.stringify(DSH_HOME_DIR)}))`,
+      `document.querySelector('#dsh-desktop-statusbar .st-home')?.replaceChildren(document.createTextNode(${JSON.stringify(DSH_HOME_DIR)}));
+       document.querySelector('#dsh-desktop-statusbar .st-ip')?.replaceChildren(document.createTextNode(${JSON.stringify(getLanIp() || '无')}));`,
     ))
     .catch(() => { /* 注入尽力而为 */ })
 }

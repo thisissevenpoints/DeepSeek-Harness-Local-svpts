@@ -21,7 +21,8 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 ::   自动审查 Node/pnpm/git/Ollama，补足 dsh-home/.env、初始化子模块、安装依赖并构建
 :: 启动：双击 启动DeepSeek-Harness.bat
 :: 停止：托盘右键"退出（停止后台服务）"，或双击 停止DeepSeek-Harness.bat
-:: 界面功能按钮区：📁打开会话存档 / 💾备份 / 📤迁移（工作区搬移）/ 🔄备份更新 / 📥恢复
+:: 界面功能按钮区：📁打开会话存档 / 💾备份 / 📤迁移（工作区搬移）/ 🔄备份更新 / 📥恢复 / 🌐局域网
+::   （局域网：默认关；开启后手机访问 http://<本机IP>:3280，首次需电脑端确认授权）
 ::   Linux/macOS：./deploy.sh && ./start.sh（停止 ./stop.sh）
 ```
 

@@ -36,6 +36,8 @@
 ├── 启动DeepSeek-Harness.bat      # 一键启动（托盘应用；双击；启动器窗口数秒后自动关闭不常驻；GBK+CRLF 编码约束见 §8-16）
 ├── 停止DeepSeek-Harness.bat      # 一键停止（托盘应用+后台服务；双击；优雅信号+端口兜底）
 ├── 部署DeepSeek-Harness.bat      # 一键部署（git 拉取后环境审查与补足：Node/pnpm/git/Ollama 审查、dsh-home/.env 补足、子模块初始化、依赖构建、Electron；幂等可重跑）
+├── deploy-win.bat                # 部署脚本 ASCII 名入口（任何代码页下 call 可解析；中文入口转发到它）
+├── deploy.sh / start.sh / stop.sh  # Linux/macOS 部署/启动/停止（等价 bat 三件套；POSIX 行为未实测）
 ├── 备份恢复DeepSeek-Harness.bat + backup-restore.ps1  # 对话存档备份/恢复/更新（PowerShell 内置 Compress-Archive，零依赖；见 §13）
 ├── install.bat / install.sh  # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
@@ -199,7 +201,7 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 - **让出空间而非覆盖**：注入后量取两栏实际高度（约 83px），给页面 body 加等量 `padding-top`，内容从两栏下方开始、零遮挡（烟测几何验证 `overlap:false`）。
 - 通知机制：**console 标记分派**（页面 `console.log('DSH_DESKTOP_*')` → 壳 `console-message` 必然送达，主通道）+ 自定义协议导航兜底（仅退出按钮保留双通道、带去重）。
 - **弹层避让**（2026-08-19）：dsh 前端弹层类名为 CSS-in-JS 生成（如 `YngKKa_overlay`），注入通用规则 `[class*="_overlay"]{top:var(--dsh-overlay-h)}`（--dsh-overlay-h = 两栏实际高度），设置等弹窗不再被顶栏/功能栏压住；
-- **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 3180` + `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `局域网 开/关`（主进程推送）+ `v0.1.0`；body padding-bottom 让位（29px）；
+- **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 3180` + `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `局域网 开/关`（主进程推送）+ `本机 <局域网 IP>`（主进程 os.networkInterfaces 获取，优先 192.168/10/172.16-31 段）+ `v0.1.0`；body padding-bottom 让位（29px）；
 - **局域网转发 + 确认鉴权**（2026-08-19，不修改 harness）：功能按钮区 `🌐 局域网` 开关 → 主进程起 `0.0.0.0:3280` 反向代理（HTTP + WebSocket 双转发）到 `127.0.0.1:3180`。**默认关闭**；开启后局域网设备访问先见"申请页"（大按钮）→ 电脑端弹确认框 → 授权后下发持久 Cookie（`desktop\lan-auth.json` 记录设备，**已 gitignore**）→ 局域网状态不变则确权不失效；删除该文件即一键撤销。官方 CLI 硬性拒绝 `--host 0.0.0.0`（RCE 风险声明），此方案绕开且保持"人类确认"安全边界；
 - 页面每次加载（含自动重载循环）后自动重新注入；loading/错误页（data:）不注入；
 4. 冒烟诊断含 `quitBtn` 字段（注入成功与否）。
