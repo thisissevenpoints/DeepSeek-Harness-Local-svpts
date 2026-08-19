@@ -20,3 +20,4 @@ Thumbs.db
 dsh-test/stability-check/
 dsh-test/*.zip
 dsh-test/install-e2e/
+dsh-test/install-e2e-result.txt
