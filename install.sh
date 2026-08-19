@@ -11,8 +11,21 @@ echo "  DeepSeek Harness Local svpts 自举安装"
 echo "=========================================="
 
 command -v git >/dev/null || { echo "[x] 未找到 git"; exit 1; }
-command -v node >/dev/null || { echo "[x] 未找到 node（需 >=22.19 或 >=24）"; exit 1; }
-command -v pnpm >/dev/null || { echo "[x] 未找到 pnpm"; exit 1; }
+command -v node >/dev/null || {
+  echo "[x] 未找到 node（需 >=22.19 或 >=24）"
+  echo "    安装指引（二选一）："
+  echo "    # 方式一（推荐，用户级免 sudo）：nvm"
+  echo "    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+  echo "    新开终端后：nvm install 22"
+  echo "    # 方式二（系统级）：NodeSource"
+  echo "    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs"
+  exit 1
+}
+command -v pnpm >/dev/null || {
+  echo "[x] 未找到 pnpm"
+  echo "    安装指引：npm install -g pnpm   （或 corepack enable 后 pnpm 自动可用）"
+  exit 1
+}
 echo "[v] git / node / pnpm 就绪"
 
 [ ! -e "$TARGET_DIR" ] || { echo "[x] 目录 $TARGET_DIR 已存在，请移除或换目录运行"; exit 1; }

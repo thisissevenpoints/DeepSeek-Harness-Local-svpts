@@ -13,7 +13,16 @@ echo "  DeepSeek Harness Local svpts 一键部署"
 echo "=========================================="
 
 echo "[1/6] 审查工具链……"
-command -v node >/dev/null || { echo "[x] 未找到 node（需 >=22.19 或 >=24）"; exit 1; }
+command -v node >/dev/null || {
+  echo "[x] 未找到 node（需 >=22.19 或 >=24）"
+  echo "    安装指引（二选一）："
+  echo "    # 方式一（推荐，用户级免 sudo）：nvm"
+  echo "    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash"
+  echo "    新开终端后：nvm install 22"
+  echo "    # 方式二（系统级）：NodeSource"
+  echo "    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs"
+  exit 1
+}
 NODE_VER=$(node -v)
 NV=${NODE_VER#v}
 MAJ=${NV%%.*}; MIN=$(echo "$NV" | cut -d. -f2)
@@ -21,7 +30,11 @@ if [ "$MAJ" -lt 22 ] || { [ "$MAJ" -eq 22 ] && [ "$MIN" -lt 19 ]; }; then
   [ "$MAJ" -ge 24 ] || { echo "[x] Node 版本不满足：$NODE_VER（需 >=22.19 或 >=24）"; exit 1; }
 fi
 echo "  [v] Node.js $NODE_VER"
-command -v pnpm >/dev/null || { echo "[x] 未找到 pnpm"; exit 1; }
+command -v pnpm >/dev/null || {
+  echo "[x] 未找到 pnpm"
+  echo "    安装指引：npm install -g pnpm   （或 corepack enable 后 pnpm 自动可用）"
+  exit 1
+}
 echo "  [v] pnpm"
 command -v git >/dev/null || { echo "[x] 未找到 git"; exit 1; }
 echo "  [v] git"
