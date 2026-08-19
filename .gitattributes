@@ -1,0 +1,14 @@
+# Windows 批处理：必须 CRLF 入仓（cmd 对 LF-only 批处理的复杂语法支持不佳）
+*.bat text eol=crlf
+
+# POSIX 脚本：必须 LF 入仓（CRLF 会导致 bash 执行失败）
+*.sh text eol=lf
+
+# Electron/Node 源码
+*.cjs text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+
+# 文档
+*.md text eol=lf
