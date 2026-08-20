@@ -190,7 +190,7 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 
 - **顶栏**（高 36px，半透明深色，整条可拖拽移动窗口）：
   - 左侧应用名"DeepSeek Harness"；
-  - 右侧按钮**自右向左**：`⏻ 完全退出`（确认框后停前后端）、`─ 最小化`、`⛶ 最大化/还原`、`✕ 关闭窗口`（回托盘）；
+  - 右侧按钮**自右向左**：`⏻ 完全退出`（确认框后停前后端）、`─ 最小化`、`⛶ 最大化/还原`、`✕ 关闭窗口`（回托盘）；左侧最前（最左）为 `⟳ 彻底重启`（2026-08-20 新增：确认框后 `app.relaunch` 整个应用，新进程重跑看门狗并重新拉起后台，旧进程停后台后退出；`--dsh-restarted` 标记供测试识别重启实例）；
 - **功能按钮区**（顶栏下方一行，2026-08-18 扩展为 4 个）：
   - `📁 打开会话存档` —— 打开 `dsh-home\sessions` 文件夹（不存在则自动创建）；
   - `💾 备份` —— 弹**图形化保存对话框**选路径，将对话存档打包为 zip（默认名 `dsh-sessions-时间戳.zip`，默认位置"文档"）；
@@ -204,7 +204,7 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 - **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 3180` + `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `局域网 开/关`（主进程推送）+ `本机 <局域网 IP>`（主进程 os.networkInterfaces 获取，优先 192.168/10/172.16-31 段）+ `v0.1.0`；body padding-bottom 让位（29px）；
 - **局域网转发 + 确认鉴权**（2026-08-19，不修改 harness）：功能按钮区 `🌐 局域网` 开关 → 主进程起 `0.0.0.0:3280` 反向代理（HTTP + WebSocket 双转发）到 `127.0.0.1:3180`。**默认关闭**；开启后局域网设备访问先见"申请页"（大按钮）→ 电脑端弹确认框 → 授权后下发持久 Cookie（`desktop\lan-auth.json` 记录设备，**已 gitignore**）→ 局域网状态不变则确权不失效；删除该文件即一键撤销。官方 CLI 硬性拒绝 `--host 0.0.0.0`（RCE 风险声明），此方案绕开且保持"人类确认"安全边界；
 - 页面每次加载（含自动重载循环）后自动重新注入；loading/错误页（data:）不注入；
-4. 冒烟诊断含 `quitBtn` 字段（注入成功与否）。
+4. 冒烟诊断含 `titlebarBtns` / `titlebarOrder` 字段（5 按钮注入与顺序：restart,quit,minimize,maximize,close-window）。
 
 ### 看门狗逻辑（内嵌于 main.cjs）
 
@@ -245,7 +245,7 @@ cd /d <项目根>
 
 ### 测试钩子（环境变量）
 
-`DSH_DESKTOP_SMOKE=1`（烟测，诊断含 overlay/titlebarBtns/openSessionsBtn 字段）、`DSH_DESKTOP_AUTOQUIT=1`（加载后仅退出不停后台）、`DSH_DESKTOP_CLOSEWIN=1`（加载后关窗留托盘）、`DSH_DESKTOP_AUTOCLICKQUIT=1`（自动点击退出按钮，配合 `DSH_DESKTOP_NOQUITCONFIRM=1` 跳过确认框）、`DSH_DESKTOP_AUTOCLICKOPEN=1`（自动点击"打开会话存档"按钮验证打开文件夹链路）、`DSH_DESKTOP_USERDATA=<路径>`（并行测试实例独立锁，不打扰运行中的会话）。
+`DSH_DESKTOP_SMOKE=1`（烟测，诊断含 overlay/titlebarBtns/openSessionsBtn 字段）、`DSH_DESKTOP_AUTOQUIT=1`（加载后仅退出不停后台）、`DSH_DESKTOP_CLOSEWIN=1`（加载后关窗留托盘）、`DSH_DESKTOP_AUTOCLICKQUIT=1`（自动点击退出按钮，配合 `DSH_DESKTOP_NOQUITCONFIRM=1` 跳过确认框）、`DSH_DESKTOP_AUTOCLICKOPEN=1`（自动点击"打开会话存档"按钮验证打开文件夹链路）、`DSH_DESKTOP_AUTOCLICKRESTART=1`（2026-08-20 新增：旧实例自动点击"彻底重启"按钮，重启后的实例（argv 含 `--dsh-restarted`）等后台被新看门狗拉起后停后台退出——闭环验证重启链路）、`DSH_DESKTOP_USERDATA=<路径>`（并行测试实例独立锁，不打扰运行中的会话）。
 
 ### 已知限制（MVP）
 
@@ -309,7 +309,7 @@ node --import "$TSX_URL" \
 5. **会话日志为 zstd 多帧容器**：`node:zlib` 的 `zstdDecompressSync` 只解第一帧；需按 magic `28 B5 2F FD`（0x28B52FFD）扫描逐帧解码。
 6. **Windows 保留端口段会 EACCES**：`netsh interface ipv4 show excludedportrange protocol=tcp` 查看保留段；2026-08-17 实测 **2993-3092 段覆盖原 3080**（系统动态预留，重启/服务变化会改变），dsh 用 `--port 3180` 迁移解决。临时服务器用 `listen(0)` 动态端口。
 7. **MSYS 的 TaskStop/普通 kill 杀不掉 node/mv 子进程**：按 PID 找进程树（`netstat -ano | findstr :3180`）→ `taskkill //F //PID`（Git Bash 双斜杠）。
-8. **本机会话环境设置了 `ELECTRON_RUN_AS_NODE=1`**（来自 CherryStudio 进程环境继承，非注册表/非 .bashrc）：跑任何 Electron 应用前必须 `unset ELECTRON_RUN_AS_NODE`（或在 cmd 里 `set ELECTRON_RUN_AS_NODE=`），否则 Electron 以纯 Node 运行（`require('electron')` 返回 exe 路径字符串，`app` 为 undefined）。**桌面壳的 `npm start` 已内置自愈（2026-08-16 修复，见 §6-2b），污染环境下可正常启动**；`DSH_HOME` 在 CherryStudio 启动前设置，其派生 shell 可能看不到——重启 CherryStudio 或手动 `export` 即可。
+8. **本机会话环境设置了 `ELECTRON_RUN_AS_NODE=1`**（来自 CherryStudio 进程环境继承，非注册表/非 .bashrc）：跑任何 Electron 应用前必须 `unset ELECTRON_RUN_AS_NODE`（或在 cmd 里 `set ELECTRON_RUN_AS_NODE=`），否则 Electron 以纯 Node 运行（`require('electron')` 返回 exe 路径字符串，`app` 为 undefined）。**桌面壳的 `npm start` 已内置自愈（2026-08-16 修复，见 §6-2b），污染环境下可正常启动**；`DSH_HOME` 在 CherryStudio 启动前设置，其派生 shell 可能看不到——重启 CherryStudio 或手动 `export` 即可。2026-08-20 补修：防御分支原先引用尚未 require 的 `fs`，导致错误日志静默丢失（进程直接退出码 1），现已改为分支内 `require('node:fs')`，保证日志必写。
 9. **Electron 37 API 变更**：`BrowserWindow.setWindowOpenHandler` 已移除 → 用 `win.webContents.setWindowOpenHandler`。
 10. **主进程 undici fetch 带 `Upgrade: websocket` 头探测 WS 不稳定**（挂起甚至静默崩溃、留僵尸进程）→ 用 `ws` 包握手探测（open 或 unexpected-response 426 均视为就绪）。
 11. **严禁 `taskkill /IM electron.exe` 镜像名级强杀**——会误杀 CherryStudio 等所有 Electron 应用；只按 PID 杀。

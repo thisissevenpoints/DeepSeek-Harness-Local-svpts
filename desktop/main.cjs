@@ -7,7 +7,8 @@
  * - 3180 已有外部实例：仅监控不接管也不杀；外部实例退出后自动拉起自己的实例
  * - 停止信号：desktop\watchdog.stop 文件出现 → 清理自己拉起的实例 → 退出（停止脚本兼容）
  * - watchdog.pid：本进程 pid（停止脚本兜底清理用）
- * - 测试钩子：DSH_DESKTOP_SMOKE=1（烟测后停后台退出）、DSH_DESKTOP_AUTOQUIT=1（加载后仅退出、不停后台）
+ * - 测试钩子：DSH_DESKTOP_SMOKE=1（烟测后停后台退出）、DSH_DESKTOP_AUTOQUIT=1（加载后仅退出、不停后台）、
+ *   DSH_DESKTOP_AUTOCLICKRESTART=1（点击顶栏"彻底重启"；重启后的实例确认后台拉起后退出——闭环验证）
  * - 日志：desktop\watchdog.log（看门狗）、desktop\shell.log（壳）；dsh 输出：desktop\dsh-web.log
  */
 const { app, BrowserWindow, Tray, Menu, dialog } = require('electron')
@@ -16,7 +17,8 @@ const { app, BrowserWindow, Tray, Menu, dialog } = require('electron')
 // 启动脚本已用 $env:VAR=$null 彻底删除该变量，此处兜底给出明确错误。
 if (!app) {
   try {
-    fs.appendFileSync(path.join(__dirname, 'shell.log'),
+    // fs 在下方才 require：此处单独引入，确保日志一定写入
+    require('node:fs').appendFileSync(require('node:path').join(__dirname, 'shell.log'),
       `[${new Date().toISOString()}] FATAL: electron running in node mode (ELECTRON_RUN_AS_NODE set). Remove the env var and retry.\n`)
   } catch { /* ignore */ }
   process.exit(1)
@@ -284,6 +286,7 @@ async function waitFor(fn, timeoutMs) {
 const QUIT_PROTOCOL_URL = 'dsh-desktop://quit'
 const CONSOLE_MARKERS = {
   QUIT: 'DSH_DESKTOP_QUIT',
+  RESTART: 'DSH_DESKTOP_RESTART', // 彻底重启：重启前端与后台服务（relaunch 整个应用）
   MINIMIZE: 'DSH_DESKTOP_MINIMIZE',
   MAXIMIZE: 'DSH_DESKTOP_MAXIMIZE',
   CLOSE_WINDOW: 'DSH_DESKTOP_CLOSE_WINDOW',
@@ -303,6 +306,7 @@ const OVERLAY_INJECT = `(() => {
   style.textContent += '.dsh-dt-btn{width:38px;height:36px;border:none;background:transparent;color:#e5e7eb;font-size:14px;cursor:pointer;-webkit-app-region:no-drag;display:flex;align-items:center;justify-content:center;transition:background .15s}'
   style.textContent += '.dsh-dt-btn:hover{background:rgba(255,255,255,.12)}'
   style.textContent += '#dsh-desktop-quit:hover{background:rgba(220,38,38,.85)}'
+  style.textContent += '#dsh-desktop-restart:hover{background:rgba(245,158,11,.75)}'
   style.textContent += '#dsh-desktop-toolbar{display:flex;align-items:center;gap:8px;padding:6px 12px;background:rgba(17,24,39,.72);border-bottom:1px solid rgba(255,255,255,.08)}'
   style.textContent += '.dsh-tool-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid rgba(255,255,255,.22);border-radius:6px;background:rgba(255,255,255,.06);color:#e5e7eb;font-size:12px;cursor:pointer;transition:background .15s}'
   style.textContent += '.dsh-tool-btn:hover{background:rgba(255,255,255,.16)}'
@@ -331,7 +335,8 @@ const OVERLAY_INJECT = `(() => {
     return b
   }
   bar.appendChild(title)
-  // 自右向左：完全退出 / 最小化 / 最大化-还原 / 关闭窗口
+  // 自右向左：完全退出 / 最小化 / 最大化-还原 / 关闭窗口（重启在最左，全局操作区聚合）
+  bar.appendChild(mkBtn('dsh-desktop-restart', '彻底重启（重启前端与后台服务）', '\\u27F3'))
   bar.appendChild(mkBtn('dsh-desktop-quit', '完全退出（停止前端与后台）', '\\u23FB'))
   bar.appendChild(mkBtn('dsh-desktop-minimize', '最小化', '\\u2500'))
   bar.appendChild(mkBtn('dsh-desktop-maximize', '最大化 / 还原', '\\u2750'))
@@ -443,6 +448,32 @@ function injectOverlay(w) {
 function requestQuitFromUi() {
   wlog('full quit requested from UI button')
   quitApp(true)
+}
+
+// 彻底重启：确认后 relaunch 整个应用（新进程重跑看门狗 → 后台服务随之重启），旧进程停止后台后退出
+function requestRestartFromUi() {
+  wlog('full restart requested from UI button')
+  const restartNow = () => {
+    // 传递 --dsh-restarted 标记：新进程可识别自己是重启后的实例（测试钩子用于验证闭环）
+    app.relaunch({ args: process.argv.slice(1).concat(['--dsh-restarted']) })
+    quitApp(true)
+  }
+  if (process.env.DSH_DESKTOP_AUTOCLICKRESTART === '1') {
+    restartNow() // 测试钩子：跳过确认框
+    return
+  }
+  const parent = win && !win.isDestroyed() ? win : undefined
+  dialog.showMessageBox(parent, {
+    type: 'question',
+    title: '彻底重启',
+    message: '确定要彻底重启 DeepSeek Harness 吗？',
+    detail: '将停止并重启前端与后台服务（进行中的任务会中断）。',
+    buttons: ['取消', '重启'],
+    defaultId: 0,
+    cancelId: 0,
+  }).then((r) => {
+    if (r.response === 1) restartNow()
+  }).catch(() => { /* 忽略 */ })
 }
 
 // 打开对话存档文件夹（dsh-home\sessions，不存在则创建）
@@ -757,6 +788,9 @@ function dispatchUiMessage(marker) {
     case CONSOLE_MARKERS.QUIT:
       requestQuitFromUi()
       break
+    case CONSOLE_MARKERS.RESTART:
+      requestRestartFromUi()
+      break
     case CONSOLE_MARKERS.MINIMIZE:
       if (win && !win.isDestroyed()) win.minimize()
       break
@@ -855,7 +889,7 @@ async function openShellWindow() {
     width: 1400,
     height: 900,
     title: 'DeepSeek Harness',
-    frame: false, // 无边框：自绘顶栏（拖拽 + 完全退出/最小化/最大化/关闭窗口）
+    frame: false, // 无边框：自绘顶栏（拖拽 + 彻底重启/完全退出/最小化/最大化/关闭窗口）
     icon: APP_ICON,
     webPreferences: { nodeIntegration: false, contextIsolation: true },
   })
@@ -897,6 +931,21 @@ async function openShellWindow() {
     slog('autoclickquit (test hook): clicking injected quit button')
     await win.webContents.executeJavaScript(`document.getElementById('dsh-desktop-quit')?.click()`)
     return
+  }
+  if (process.env.DSH_DESKTOP_AUTOCLICKRESTART === '1') {
+    if (process.argv.includes('--dsh-restarted')) {
+      // 重启后的实例：等新看门狗把后台拉起，验证闭环后停后台退出
+      const up = await waitFor(isWebUp, 90000)
+      slog(`autoclickrestart (test hook): restarted instance confirmed, webUp=${up}, pid=${process.pid}`)
+      quitting = true
+      killOwnedBackend()
+      app.quit()
+      return
+    }
+    await new Promise(r => setTimeout(r, 3000))
+    slog('autoclickrestart (test hook): clicking injected restart button')
+    await win.webContents.executeJavaScript(`document.getElementById('dsh-desktop-restart')?.click()`)
+    return // relaunch 已安排，本进程即将退出
   }
   if (process.env.DSH_DESKTOP_AUTOCLICKOPEN === '1') {
     await new Promise(r => setTimeout(r, 3000))
@@ -970,7 +1019,7 @@ async function openShellWindow() {
     const diag = await win.webContents.executeJavaScript(`(async () => {
       const out = { title: document.title, url: location.href, ua: navigator.userAgent.slice(0, 80) }
       out.overlay = !!document.getElementById('dsh-desktop-overlay')
-      out.titlebarBtns = ['quit', 'minimize', 'maximize', 'close-window']
+      out.titlebarBtns = ['restart', 'quit', 'minimize', 'maximize', 'close-window']
         .map((n) => 'dsh-desktop-' + n)
         .filter((id) => !!document.getElementById(id)).length
       out.titlebarOrder = [...(document.getElementById('dsh-desktop-titlebar')?.children || [])]
