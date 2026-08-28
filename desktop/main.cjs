@@ -41,6 +41,8 @@ try {
   if (loc && loc.home) DSH_HOME_DIR = loc.home // 迁移后的工作区位置
 } catch { /* 无迁移记录，用默认位置 */ }
 const WEB_URL = 'http://127.0.0.1:3180'
+let launchToken = null // 上游 0.1.2 启动鉴权 token（从 dsh-web.log 解析）
+let webAuthCookie = null // token→cookie 交换得到的会话 cookie（用于主进程探测与 LAN 代理）
 const DIR = __dirname
 const PID_FILE = path.join(DIR, 'watchdog.pid')
 const STOP_FILE = path.join(DIR, 'watchdog.stop')
@@ -146,8 +148,10 @@ function portInUse(port) {
 
 function startDsh() {
   const out = fs.openSync(path.join(DIR, 'dsh-web.log'), 'a')
+  launchToken = null // 新进程 token 变化，重置以便重新解析
+  webAuthCookie = null
   if (IS_WIN) {
-    dshChild = spawn('cmd', ['/c', 'pnpm dsh web --port 3180'], {
+    dshChild = spawn('cmd', ['/c', 'pnpm dsh web --port 3180 --no-open'], {
       cwd: REPO_DIR,
       env: { ...process.env, DSH_HOME: DSH_HOME_DIR },
       windowsHide: true,
@@ -155,7 +159,7 @@ function startDsh() {
     })
   } else {
     // POSIX: 直接 spawn pnpm（detached 独立进程组，便于整组终止）
-    dshChild = spawn('pnpm', ['dsh', 'web', '--port', '3180'], {
+    dshChild = spawn('pnpm', ['dsh', 'web', '--port', '3180', '--no-open'], {
       cwd: REPO_DIR,
       env: { ...process.env, DSH_HOME: DSH_HOME_DIR },
       detached: true,
@@ -166,6 +170,53 @@ function startDsh() {
   owned = true
   lastSpawnAt = Date.now()
   wlog(`spawned dsh (pid ${dshChild.pid})`)
+}
+
+// —— 上游 0.1.2 浏览器鉴权适配 ——
+// dsh web 每次启动生成随机 launch token（URL 打印到 stdout，写入 dsh-web.log）：
+//   / 无 token → 401；/?token=xxx → 303 + Set-Cookie（换到会话 cookie）
+//   /api 与 WS /api/remote.mux 需会话 cookie + loopback/trusted Host。
+// 壳必须：1) 用 --no-open 关掉自动开浏览器；2) 从日志解析 token 加载窗口；
+// 3) 用 cookie 做主进程探测与局域网代理转发。
+function readLaunchToken() {
+  try {
+    // dsh-web.log 为追加日志：取最后一次匹配（当前进程的 token 在文件末尾；match 取首个会拿到历史旧 token）
+    const log = fs.readFileSync(path.join(DIR, 'dsh-web.log'), 'utf8')
+    const all = [...log.matchAll(/dsh web: http:\/\/127\.0\.0\.1:3180\/\?token=([A-Za-z0-9_-]+)/g)]
+    if (all.length) return all[all.length - 1][1]
+  } catch { /* 日志可能尚未写入 */ }
+  return null
+}
+function getLaunchToken() {
+  // 不缓存：每次从日志读取最新 token（新进程 spawn 后可能追加新行，缓存会读到旧进程的过期 token）
+  const t = readLaunchToken()
+  if (t) launchToken = t
+  return t
+}
+function webUrlWithToken() {
+  const t = getLaunchToken()
+  return t ? `http://127.0.0.1:3180/?token=${t}` : WEB_URL
+}
+// token→cookie 交换：带 token 请求 /，捕获 Set-Cookie（authority 绑定 127.0.0.1:3180）
+// 注意：Node.js 的 fetch 遵循 WHATWG 规范，Set-Cookie 为 forbidden response-header，
+// 无法通过 res.headers.get('set-cookie') 读取，必须用 http.request 手动获取。
+async function ensureWebAuthCookie() {
+  if (webAuthCookie) return true
+  const t = getLaunchToken()
+  if (!t) return false
+  try {
+    const sc = await new Promise((resolve) => {
+      const req = http.request({ host: '127.0.0.1', port: 3180, path: '/?token=' + t, method: 'GET' }, (res) => {
+        const h = res.headers['set-cookie']
+        resolve(h ? (Array.isArray(h) ? h[0] : h) : null)
+      })
+      req.on('error', () => resolve(null))
+      req.setTimeout(3000, () => { req.destroy(); resolve(null) })
+      req.end()
+    })
+    if (sc) webAuthCookie = sc.split(';')[0]
+  } catch { /* 服务未就绪 */ }
+  return !!webAuthCookie
 }
 
 async function probeWeb() {
@@ -245,8 +296,11 @@ let tray = null // 必须保持模块级引用，否则 Tray 会被 GC、图标�
 
 async function isWebUp() {
   try {
-    const res = await fetch(WEB_URL, { signal: AbortSignal.timeout(2000) })
-    return res.ok
+    await ensureWebAuthCookie()
+    const headers = webAuthCookie ? { cookie: webAuthCookie } : undefined
+    const res = await fetch(WEB_URL, { headers, redirect: 'manual', signal: AbortSignal.timeout(2000) })
+    // 200：已鉴权可访问；303：鉴权成功重定向到 /（窗口侧加载带 token 即可）；其余（401）待 token 交换
+    return res.status === 200 || res.status === 303
   } catch {
     return false
   }
@@ -262,7 +316,10 @@ function isApiUp() {
       try { ws.terminate() } catch { /* 已关闭 */ }
       resolve(v)
     }
-    const ws = new WebSocket(WEB_URL.replace('http://', 'ws://') + '/api/events.mux')
+    // 上游 0.1.2：WS 路径改为 /api/remote.mux，升级需会话 cookie（requestRejection = trusted host + isAuthenticated）
+    const options = { headers: {} }
+    if (webAuthCookie) options.headers.cookie = webAuthCookie
+    const ws = new WebSocket(WEB_URL.replace('http://', 'ws://') + '/api/remote.mux', options)
     ws.on('open', () => done(true))
     ws.on('unexpected-response', (_req, res) => done(res.statusCode === 426))
     ws.on('error', () => done(false))
@@ -675,7 +732,9 @@ function lanAuthorized(req) {
 
 function proxyHttp(req, res) {
   const headers = { ...req.headers, host: '127.0.0.1:3180' }
-  delete headers.cookie // 转发层 Cookie 不传给 dsh（dsh 不认）
+  // 上游 0.1.2：/ 与 /api 需要 dsh 会话 cookie；LAN 授权 cookie 不传给 dsh
+  delete headers.cookie
+  if (webAuthCookie) headers.cookie = webAuthCookie
   const p = http.request({ host: '127.0.0.1', port: 3180, path: req.url, method: req.method, headers }, (pres) => {
     res.writeHead(pres.statusCode, pres.headers)
     pres.pipe(res)
@@ -685,9 +744,12 @@ function proxyHttp(req, res) {
 }
 
 function proxyUpgrade(req, socket, head) {
+  const headers = { ...req.headers, host: '127.0.0.1:3180' }
+  delete headers.cookie
+  if (webAuthCookie) headers.cookie = webAuthCookie
   const p = http.request({
     host: '127.0.0.1', port: 3180, path: req.url,
-    headers: { ...req.headers, host: '127.0.0.1:3180' },
+    headers,
   })
   p.on('upgrade', (pres, psocket, phead) => {
     const lines = ['HTTP/1.1 101 Switching Protocols']
@@ -866,7 +928,8 @@ async function bootWindowInto(w) {
     return false
   }
   slog('bootWindow: loading URL')
-  await w.loadURL(WEB_URL)
+  // 上游 0.1.2：首次加载需带启动 token（/ 带 token → 303 + Set-Cookie，浏览器自动种 cookie 后正常进入）
+  await w.loadURL(webUrlWithToken())
   slog('bootWindow: loaded')
   // 宿主刚启动时 /api 路由与前端插件树可能尚未完全就绪：失败则等待并重载（最多 7 次）
   for (let attempt = 0; attempt < 7; attempt++) {
@@ -874,7 +937,7 @@ async function bootWindowInto(w) {
     if (!(await pageBootFailed(w))) break
     slog(`bootWindow: frontend boot failed, waiting for api then reloading (${attempt + 1}/7)`)
     await waitFor(isApiUp, 10000)
-    await w.loadURL(WEB_URL)
+    await w.loadURL(webUrlWithToken())
   }
   return true
 }
@@ -1053,14 +1116,14 @@ async function openShellWindow() {
       })()
       out.bodyText = document.body ? document.body.innerText.slice(0, 300) : '(no body)'
       try {
-        const r = await fetch('/api/events.mux', { headers: { Upgrade: 'websocket' } })
+        const r = await fetch('/api/remote.mux', { headers: { Upgrade: 'websocket' } })
         out.fetchMux = 'status ' + r.status
       } catch (e) { out.fetchMux = 'ERROR: ' + String(e).slice(0, 120) }
       try {
         out.ws = await new Promise((resolve) => {
           let settled = false
           const done = (x) => { if (!settled) { settled = true; resolve(x) } }
-          const ws = new WebSocket('ws://127.0.0.1:3180/api/events.mux')
+          const ws = new WebSocket('ws://127.0.0.1:3180/api/remote.mux')
           ws.onopen = () => done('OPEN')
           ws.onerror = (e) => done('ERROR')
           ws.onclose = (e) => done('CLOSE ' + e.code)

@@ -24,6 +24,7 @@
 | 2026-08-16 深夜 | 按需改造为**看门狗架构**：新增 `desktop\watchdog.cjs`（后台唯一 owner、崩溃自动重启、停止信号），壳改纯客户端（关窗不停后台），新增 `停止DeepSeek-Harness.bat`，全链路实测通过 |
 | 2026-08-16 深夜 | 修复启动脚本并定版**托盘应用**：看门狗与壳合并为单一常驻托盘 Electron 应用（右键菜单退出/启动壳、second-instance 唤起、loading 页即时反馈）；修复 Electron 空环境变量 node 模式陷阱、window-all-closed 托盘消失、退出竞态等 4 个缺陷 |
 | 2026-08-17 | 升级 dsh 至 **v0.1.0-rc.7**（47f943859b→99f6f02fec，111 提交）；因 Windows 动态端口保留段（2993-3092）覆盖原 3080 导致 EACCES，**端口整体迁移 3080→3180**（`--port 3180` 参数 + 全链路改造），烟测通过 |
+| 2026-08-29 | 升级 dsh 至 **v0.1.2-alpha.1**（99f6f02fec→cd5ef81481，1822 提交）；上游新增 **Web 浏览器启动鉴权**（每次启动随机 token，`/` 无 token 401，`/?token=` 换会话 cookie，`/api` 与 WS 均需 cookie），**WS 路径 `/api/events.mux`→`/api/remote.mux`**；壳适配：`--no-open` 关闭自动开浏览器、从 dsh-web.log 解析 token（取最后一次匹配）、主进程用 `http.request` 做 token→cookie 交换（fetch 读不到 Set-Cookie）、`isWebUp`/`isApiUp`/LAN 代理均带 cookie；烟测与重启闭环通过 |
 
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
@@ -42,7 +43,7 @@
 ├── install.bat / install.sh  # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
-├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.0-rc.5）
+├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.2-alpha.1，2026-08-29 升级）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
 │   ├── apps\web\dist\           # Web 前端构建产物（vite 输出，约 12MB）
 │   ├── packages\*\*\lib\        # 各 TS 包构建产物（tsc/tsdown 输出）
@@ -110,9 +111,9 @@
 
 | 端点 | 用途 |
 |---|---|
-| `http://127.0.0.1:3180` | dsh Web UI（仅监听本机；官方暂不支持 --host 0.0.0.0） |
-| `http://127.0.0.1:3180/api/*` | 宿主 API 前缀（浏览器端 RPC 上行） |
-| `ws://127.0.0.1:3180/api/events.mux` | 浏览器端 WebSocket 下行（就绪判据：握手成功或 HTTP 426） |
+| `http://127.0.0.1:3180` | dsh Web UI（仅监听本机；官方暂不支持 --host 0.0.0.0）。**0.1.2 起需启动 token**：`/?token=<随机>` 换取会话 cookie 后进入 |
+| `http://127.0.0.1:3180/api/*` | 宿主 API 前缀（浏览器端 RPC 上行；需会话 cookie） |
+| `ws://127.0.0.1:3180/api/remote.mux` | 浏览器端 WebSocket 下行（0.1.2 起由 events.mux 改名；需会话 cookie；就绪判据：握手成功） |
 | `http://127.0.0.1:11434/v1` | Ollama OpenAI 兼容端点（settings.yaml 中 `ollama-local` provider） |
 
 ## 5. 配置详解（dsh-home）
@@ -208,7 +209,7 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 
 ### 看门狗逻辑（内嵌于 main.cjs）
 
-1. 3180 无服务：`cmd /c pnpm dsh web` 拉起（cwd=仓库根，注入 `DSH_HOME`）；
+1. 3180 无服务：`cmd /c pnpm dsh web --port 3180 --no-open` 拉起（cwd=仓库根，注入 `DSH_HOME`；`--no-open` 避免 0.1.2 自动开浏览器）；
 2. 健康巡检每 5 秒；**任何 HTTP 响应（含启动期 404）即视为存活**；
 3. **宕机判定以子进程存活为准**（无固定宽限时间）：进程活着就视为"启动中/运行中"绝不误杀（dsh 冷启动随负载波动 10-30 秒）；进程死亡且端口不通才重启；进程存活但 3 分钟不监听视为卡死强制重启；
 4. 崩溃自动重启；连续 4 次真正不可达进入"放弃重启但持续监测"状态（后台恢复后自动复位，不再永久死锁）；
@@ -220,8 +221,16 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 ### 窗口加载逻辑
 
 1. 窗口先显示 loading 页（即时反馈）→ 等待 3180 就绪（最长 90 秒，超时显示内嵌错误页含排查指引）；
-2. `ws` 包握手探测 `/api/events.mux`（open 或 426 均视为就绪）；
+2. `ws` 包握手探测 `/api/remote.mux`（需会话 cookie，open 视为就绪）；
 3. 加载真实 UI；检测到页面 "Failed to load plugins" 时自动等待并重载（最多 7 次，总时限约 2 分钟）。
+
+### 上游 0.1.2 浏览器鉴权适配（2026-08-29）
+
+dsh 0.1.2 起 web 模式引入**启动 token 鉴权**，壳需三处配合：
+
+1. **`--no-open`**：`dsh web` 默认自动打开系统浏览器（0.1.2 行为），壳 spawn 时必须加 `--no-open`，否则每次启动弹浏览器；
+2. **token 捕获**：每次启动随机生成 launch token，URL 打印到 stdout（进 `dsh-web.log`）。壳从日志**取最后一次匹配**（`matchAll` 取末尾，`match` 取首个会拿到历史旧 token 导致 401）；`getLaunchToken` **不缓存**——新进程 spawn 后日志追加新行，缓存会永久卡在旧 token；
+3. **token→cookie 交换**：带 token GET `/` → 303 + `Set-Cookie`（authority 绑定 127.0.0.1:3180）。**必须用 `http.request` 而非 `fetch`**——Node 的 fetch 遵循 WHATWG，`Set-Cookie` 是 forbidden response-header，`res.headers.get('set-cookie')` 永远返回 null（静默失败，曾导致 90s 超时）。换到的 cookie 用于：`isWebUp`（`/` 需 cookie）、`isApiUp`（`/api/remote.mux` 升级需 cookie）、**局域网代理转发**（`proxyHttp`/`proxyUpgrade` 注入 `webAuthCookie`，否则手机访问 401）。窗口加载用 `webUrlWithToken()`（浏览器自动完成 cookie 交换）。
 
 ### 停止
 
@@ -316,7 +325,7 @@ node --import "$TSX_URL" \
 12. **headless 源模式依赖 cwd**：tsx 的 tsconfig 发现基于 cwd，必须从仓库外启动并用 `TSX_TSCONFIG_PATH` 锚定仓库 tsconfig；`--import` 的 tsx 路径要用 `file:///` URL 形式（Windows 盘符路径会被 ESM loader 拒绝）。
 13. **迁移 .dsh 时先删 `profiles\node_modules`**（纯符号链接目录，启动时自愈），否则 mv 报错。
 14. **D 盘小文件 IO 较慢**（疑似机械盘）：大量小文件操作（mv/rmdir 十万级文件）可能耗时 10 分钟以上，优先 robocopy /MT:16、git clone、cmd `rmdir /s /q` 等原生工具。
-15. **Web 就绪判据**：curl 200 只代表 webserver 起来；判断浏览器可用还需 WS `/api/events.mux` 握手（壳已内置此逻辑）。
+15. **Web 就绪判据**：curl 200 只代表 webserver 起来；判断浏览器可用还需 WS 握手（0.1.2 起为 `/api/remote.mux`，旧版 `/api/events.mux`，壳已内置此逻辑）。
 16. **启动 bat 必须保持 GBK+CRLF 编码**：中文 Windows 的 cmd 以 GBK 解析批处理，UTF-8 编码会导致含中文的 `if (...)` 块解析错位（行尾被吞、行碎片被当命令执行），`chcp 65001` 也救不了块内中文。**任何编辑（含 AI 工具的增量编辑）后都必须重新转换**：`iconv -f UTF-8 -t CP936` + `unix2dos`，改完用 `iconv -f CP936 -t UTF-8` 回读验证无乱码再交付；切勿直接存成 UTF-8。
 17. **bat 内的外部命令一律写 System32 绝对路径**（`%SystemRoot%\System32\where.exe` 等）：从 Git Bash 等 MSYS 环境调用时，PATH 里的 GNU 工具（where、timeout 等）会劫持同名命令导致参数不兼容。倒计时用 `%SystemRoot%\System32\PING.EXE -n 4 127.0.0.1 >nul`（约 3 秒），不要用 `timeout`（stdin 被重定向时直接报错退出）。
 18. **dsh web 冷启动时长随负载波动（实测 10-30 秒）**：健康检查**禁止用固定宽限期**——早期版本用 20 秒宽限，机器慢时依然把启动中的实例误杀成"杀了又起"循环（症状：watchdog.log 反复 `backend unreachable ... restarting`，`[ELIFECYCLE] Command failed with exit code 1` 是被 taskkill 的正常痕迹）。定版方案：**以子进程存活为判据**（进程活着就不杀；死了且端口不通才重启；3 分钟不监听才判卡死），且"任何 HTTP 响应（含 404）即存活"。
@@ -330,6 +339,7 @@ node --import "$TSX_URL" \
 26. **官方 CLI 硬拒 `--host 0.0.0.0`**（rc.7 实测）：报错 "intentionally not supported yet for safety: it would expose remote code execution to the network"；`--host 具体局域网 IP` 也会在 profile 加载阶段失败。局域网访问只能走壳内转发层（见 §6）。
 27. **手写 WS 代理的两个坑**：①客户端 upgrade 首包（`head`）必须 `p.write(head)` 转发给后端，否则握手后客户端帧丢失（ws 库 TIMEOUT）；②代理返回的 101 响应头必须以**完整空行** `\r\n\r\n` 结尾（curl 宽容可解析、ws 库严格解析会挂起）。另外 mkTool 按钮 id 必须与 CONSOLE_MARKERS 键名逐字对应（`lan` ≠ `LAN_TOGGLE`，曾导致点击无效）。
 28. **外部代码审查（Gemini）核对结论**：其"潜在隐患"多数不成立（taskkill /T /F、PowerShell Bypass、Token 授权均早已实现；`.env` 只有占位符无真 Key）。据此落实两项真实改进（2026-08-19）：①局域网授权 Cookie 加 `HttpOnly`（防页面 JS 窃取 token）；②看门狗 spawn 前 TCP 预探测 3180（外部进程占端口时不再无谓 spawn，`portInUse` 用 `net.connect` 探测；外部实例退出后自动接管，实测：占用时 spawn 0 次、释放后 2 秒自动拉起）。
+29. **上游 0.1.2 token 鉴权的三个坑**（2026-08-29 升级实测）：①**token 解析必须取日志最后一次匹配**——`dsh-web.log` 是追加日志，`match` 取首个会拿到历史旧进程的 token，交换必然 401；②**token 不能缓存**——`startDsh` 重置后若缓存了 spawn 前的旧值（可能来自更早实例），新进程写入日志后也永不更新，导致 `waitWebUp=false` 永久超时；③**cookie 交换必须用 `http.request` 而非 `fetch`**——Node fetch 按 WHATWG 规范屏蔽 `Set-Cookie` 响应头（forbidden response-header），`res.headers.get('set-cookie')` 恒为 null，交换静默失败且无报错，症状同样是 90 秒超时。诊断路径：`bootWindow: waitWebUp=false` 时先查 `dsh-web.log` 是否有新 `dsh web: ...token=` 行、再手工 `curl -D - "http://127.0.0.1:3180/?token=<新token>"` 验证 303+Set-Cookie。
 
 ## 9. 数据与日志位置
 
