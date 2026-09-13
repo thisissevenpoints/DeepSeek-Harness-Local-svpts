@@ -25,6 +25,7 @@
 | 2026-08-16 深夜 | 修复启动脚本并定版**托盘应用**：看门狗与壳合并为单一常驻托盘 Electron 应用（右键菜单退出/启动壳、second-instance 唤起、loading 页即时反馈）；修复 Electron 空环境变量 node 模式陷阱、window-all-closed 托盘消失、退出竞态等 4 个缺陷 |
 | 2026-08-17 | 升级 dsh 至 **v0.1.0-rc.7**（47f943859b→99f6f02fec，111 提交）；因 Windows 动态端口保留段（2993-3092）覆盖原 3080 导致 EACCES，**端口整体迁移 3080→3180**（`--port 3180` 参数 + 全链路改造），烟测通过 |
 | 2026-08-29 | 升级 dsh 至 **v0.1.2-alpha.1**（99f6f02fec→cd5ef81481，1822 提交）；上游新增 **Web 浏览器启动鉴权**（每次启动随机 token，`/` 无 token 401，`/?token=` 换会话 cookie，`/api` 与 WS 均需 cookie），**WS 路径 `/api/events.mux`→`/api/remote.mux`**；壳适配：`--no-open` 关闭自动开浏览器、从 dsh-web.log 解析 token（取最后一次匹配）、主进程用 `http.request` 做 token→cookie 交换（fetch 读不到 Set-Cookie）、`isWebUp`/`isApiUp`/LAN 代理均带 cookie；烟测与重启闭环通过 |
+| 2026-09-13 | 升级 dsh 至 **v0.1.5-rc.2**（cd5ef81481→c291e7961a，2285 提交）；上游版本快速迭代（0.1.3/0.1.4/0.1.5），壳侧适配逻辑无需变更（token 鉴权 + WS 路径已稳定）；烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN 转发 `LAN-WS-OPEN` 全通过 |
 
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
