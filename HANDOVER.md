@@ -26,6 +26,7 @@
 | 2026-08-17 | 升级 dsh 至 **v0.1.0-rc.7**（47f943859b→99f6f02fec，111 提交）；因 Windows 动态端口保留段（2993-3092）覆盖原 3080 导致 EACCES，**端口整体迁移 3080→3180**（`--port 3180` 参数 + 全链路改造），烟测通过 |
 | 2026-08-29 | 升级 dsh 至 **v0.1.2-alpha.1**（99f6f02fec→cd5ef81481，1822 提交）；上游新增 **Web 浏览器启动鉴权**（每次启动随机 token，`/` 无 token 401，`/?token=` 换会话 cookie，`/api` 与 WS 均需 cookie），**WS 路径 `/api/events.mux`→`/api/remote.mux`**；壳适配：`--no-open` 关闭自动开浏览器、从 dsh-web.log 解析 token（取最后一次匹配）、主进程用 `http.request` 做 token→cookie 交换（fetch 读不到 Set-Cookie）、`isWebUp`/`isApiUp`/LAN 代理均带 cookie；烟测与重启闭环通过 |
 | 2026-09-13 | 升级 dsh 至 **v0.1.5-rc.2**（cd5ef81481→c291e7961a，2285 提交）；上游版本快速迭代（0.1.3/0.1.4/0.1.5），壳侧适配逻辑无需变更（token 鉴权 + WS 路径已稳定）；烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN 转发 `LAN-WS-OPEN` 全通过 |
+| 2026-09-15 | 升级 dsh 至 **v0.1.6-alpha.1**（c291e7961a→0d1f50007f，666 提交）；壳侧适配逻辑仍无需变更；烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN 转发 `HTTP 200`+`LAN-WS-OPEN` 全通过。**注意**：本轮实测该版本在「端口残留 + 快速连续 spawn」场景下出现 `0xC0000005`（exit 3221225477）启动崩溃（8 次隔离运行中 1 次、烟测首次因端口残留连续 4 次触发看门狗放弃重启）；彻底清理端口后单实例稳定运行 60 秒无异常、重跑烟测通过。**升级/重启前务必确认 3180 无残留监听进程**（见 §8-30） |
 
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
@@ -44,7 +45,7 @@
 ├── install.bat / install.sh  # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
-├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.2-alpha.1，2026-08-29 升级）
+├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.6-alpha.1，2026-09-15 升级）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
 │   ├── apps\web\dist\           # Web 前端构建产物（vite 输出，约 12MB）
 │   ├── packages\*\*\lib\        # 各 TS 包构建产物（tsc/tsdown 输出）
@@ -341,6 +342,7 @@ node --import "$TSX_URL" \
 27. **手写 WS 代理的两个坑**：①客户端 upgrade 首包（`head`）必须 `p.write(head)` 转发给后端，否则握手后客户端帧丢失（ws 库 TIMEOUT）；②代理返回的 101 响应头必须以**完整空行** `\r\n\r\n` 结尾（curl 宽容可解析、ws 库严格解析会挂起）。另外 mkTool 按钮 id 必须与 CONSOLE_MARKERS 键名逐字对应（`lan` ≠ `LAN_TOGGLE`，曾导致点击无效）。
 28. **外部代码审查（Gemini）核对结论**：其"潜在隐患"多数不成立（taskkill /T /F、PowerShell Bypass、Token 授权均早已实现；`.env` 只有占位符无真 Key）。据此落实两项真实改进（2026-08-19）：①局域网授权 Cookie 加 `HttpOnly`（防页面 JS 窃取 token）；②看门狗 spawn 前 TCP 预探测 3180（外部进程占端口时不再无谓 spawn，`portInUse` 用 `net.connect` 探测；外部实例退出后自动接管，实测：占用时 spawn 0 次、释放后 2 秒自动拉起）。
 29. **上游 0.1.2 token 鉴权的三个坑**（2026-08-29 升级实测）：①**token 解析必须取日志最后一次匹配**——`dsh-web.log` 是追加日志，`match` 取首个会拿到历史旧进程的 token，交换必然 401；②**token 不能缓存**——`startDsh` 重置后若缓存了 spawn 前的旧值（可能来自更早实例），新进程写入日志后也永不更新，导致 `waitWebUp=false` 永久超时；③**cookie 交换必须用 `http.request` 而非 `fetch`**——Node fetch 按 WHATWG 规范屏蔽 `Set-Cookie` 响应头（forbidden response-header），`res.headers.get('set-cookie')` 恒为 null，交换静默失败且无报错，症状同样是 90 秒超时。诊断路径：`bootWindow: waitWebUp=false` 时先查 `dsh-web.log` 是否有新 `dsh web: ...token=` 行、再手工 `curl -D - "http://127.0.0.1:3180/?token=<新token>"` 验证 303+Set-Cookie。
+30. **端口残留 + 快速连续 spawn 会触发 dsh 0.1.6 启动崩溃**（2026-09-15 实测）：dsh 0.1.6-alpha.1 在 3180 仍处于残留/TIME_WAIT 状态时被立刻重新拉起，出现 `0xC0000005`（exit 3221225477，无任何输出即死）；看门狗 5 秒间隔连试 4 次全崩后进入"放弃自动重启"（日志：`backend unreachable 4 times in a row, giving up on auto-restart`）。**处理**：彻底清端口（`netstat -ano | grep :3180` 取 PID → `taskkill //F //PID`）并等 3-5 秒再启动，单实例长跑 60 秒稳定。**升级/重启前务必确认 3180 无残留监听**。该现象疑似上游该版本的启动竞态（隔离 8 次运行复现 1 次），非壳缺陷。
 
 ## 9. 数据与日志位置
 
