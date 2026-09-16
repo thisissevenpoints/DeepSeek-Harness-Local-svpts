@@ -26,10 +26,13 @@ if exist "%ROOT%desktop\watchdog.pid" (
 )
 
 :WD_GONE
-rem 2) 兜底：清理 3180 上的残留实例（外部手动启动 / 孤儿进程）
-for /f "tokens=5" %%a in ('%SystemRoot%\System32\netstat.exe -ano ^| %SystemRoot%\System32\findstr.exe ":3180" ^| %SystemRoot%\System32\findstr.exe /C:"LISTENING"') do (
-    echo [停止] 清理 3180 残留实例（PID %%a）……
-    %SystemRoot%\System32\taskkill.exe /F /T /PID %%a >nul 2>nul
+rem 2) 兜底：清理候选端口上的残留实例（外部手动启动 / 孤儿进程）
+rem    端口候选表须与 desktop\main.cjs 的 WEB_PORT_CANDIDATES 保持一致
+for %%P in (3180 2180 4180 6180 8180) do (
+    for /f "tokens=5" %%a in ('%SystemRoot%\System32\netstat.exe -ano ^| %SystemRoot%\System32\findstr.exe /C:":%%P " ^| %SystemRoot%\System32\findstr.exe /C:"LISTENING"') do (
+        echo [停止] 清理端口 %%P 上的残留实例（PID %%a）……
+        %SystemRoot%\System32\taskkill.exe /F /T /PID %%a >nul 2>nul
+    )
 )
 echo [完成] 后台服务与托盘应用已停止。
 %SystemRoot%\System32\PING.EXE -n 4 127.0.0.1 >nul

@@ -22,11 +22,13 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$STOP_FILE"
 fi
 
-# 兜底：清理 3180 上的残留实例
-LPID=$(lsof -t -i :3180 2>/dev/null | head -1)
-if [ -n "$LPID" ]; then
-  echo "[停止] 清理 3180 残留实例（PID $LPID）……"
-  kill -TERM "$LPID" 2>/dev/null || true
-fi
+# 兜底：清理候选端口上的残留实例（候选表与 desktop/main.cjs 的 WEB_PORT_CANDIDATES 一致）
+for PORT in 3180 2180 4180 6180 8180; do
+  LPID=$(lsof -t -i ":$PORT" 2>/dev/null | head -1)
+  if [ -n "$LPID" ]; then
+    echo "[停止] 清理端口 $PORT 残留实例（PID $LPID）……"
+    kill -TERM "$LPID" 2>/dev/null || true
+  fi
+done
 
 echo "[完成] 后台服务与应用已停止。"

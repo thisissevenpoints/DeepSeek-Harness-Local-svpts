@@ -4,7 +4,8 @@
  * - 托盘左键或菜单"打开 DeepSeek Harness"：打开/聚焦应用窗口（关窗回到托盘，后台不停）
  * - 托盘菜单"退出（停止后台服务）"或停止脚本：显式退出才停后台
  * - 启动脚本双击时若已在运行：通过 second-instance 事件直接唤起窗口
- * - 3180 已有外部实例：仅监控不接管也不杀；外部实例退出后自动拉起自己的实例
+ * - DSH 端口已有外部实例：仅监控不接管也不杀；外部实例退出后自动拉起自己的实例
+ * - Web 端口启动时实测选定（候选表见 WEB_PORT_CANDIDATES）：Windows 动态保留段漂移后自动换端口
  * - 停止信号：desktop\watchdog.stop 文件出现 → 清理自己拉起的实例 → 退出（停止脚本兼容）
  * - watchdog.pid：本进程 pid（停止脚本兜底清理用）
  * - 测试钩子：DSH_DESKTOP_SMOKE=1（烟测后停后台退出）、DSH_DESKTOP_AUTOQUIT=1（加载后仅退出、不停后台）、
@@ -40,7 +41,14 @@ try {
   const loc = JSON.parse(fs.readFileSync(HOME_LOC_FILE, 'utf8'))
   if (loc && loc.home) DSH_HOME_DIR = loc.home // 迁移后的工作区位置
 } catch { /* 无迁移记录，用默认位置 */ }
-const WEB_URL = 'http://127.0.0.1:3180'
+// —— Web 端口（运行时选定）——
+// Windows 的动态保留段（Hyper-V/WSL 等预约）会随重启漂移，落进保留段的端口 listen 会
+// 直接 EACCES（曾 3080 被 2993-3092 覆盖、2026-09-16 3180 又被 3171-3270 覆盖），
+// 表现为 dsh 反复启动失败、看门狗放弃重启。故启动时按候选表实测绑定，跳过被保留/被占端口。
+const WEB_PORT_CANDIDATES = [3180, 2180, 4180, 6180, 8180]
+let webPort = WEB_PORT_CANDIDATES[0]
+let WEB_URL = `http://127.0.0.1:${webPort}`
+let WEB_PORT = String(webPort)
 let launchToken = null // 上游 0.1.2 启动鉴权 token（从 dsh-web.log 解析）
 let webAuthCookie = null // token→cookie 交换得到的会话 cookie（用于主进程探测与 LAN 代理）
 const DIR = __dirname
@@ -91,17 +99,69 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true } catch { return false }
 }
 
+// 绑定实测端口状态：'free' 可用 | 'busy' 已有监听者 | 'reserved' Windows 保留段（EACCES）
+function probeBind(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer()
+    srv.once('error', (e) => {
+      resolve(e && e.code === 'EADDRINUSE' ? 'busy' : 'reserved')
+    })
+    srv.once('listening', () => srv.close(() => resolve('free')))
+    srv.listen(port, '127.0.0.1')
+  })
+}
+
+async function httpAlive(port) {
+  try {
+    await fetch(`http://127.0.0.1:${port}`, { signal: AbortSignal.timeout(1500) })
+    return true
+  } catch { return false }
+}
+
+function setWebPort(p) {
+  webPort = p
+  WEB_URL = `http://127.0.0.1:${p}`
+  WEB_PORT = String(p)
+}
+
+// 依次实测候选端口：可用即选定；被占用且确有 HTTP 服务 → 视为外部 dsh 实例（沿用"只监控不接管"）；
+// 落进 Windows 保留段或非 HTTP 占用 → 试下一个。这样保留段漂移后后端仍能被拉起。
+async function selectWebPort() {
+  for (const p of WEB_PORT_CANDIDATES) {
+    const state = await probeBind(p)
+    if (state === 'free') {
+      setWebPort(p)
+      wlog(`web port selected: ${p} (bindable)`)
+      return
+    }
+    if (state === 'busy') {
+      if (await httpAlive(p)) {
+        setWebPort(p)
+        wlog(`web port ${p} already serving HTTP (external dsh instance), attaching`)
+        return
+      }
+      wlog(`web port ${p} busy by a non-HTTP listener, trying next candidate`)
+      continue
+    }
+    wlog(`web port ${p} reserved by Windows excluded range (EACCES), trying next candidate`)
+  }
+  setWebPort(WEB_PORT_CANDIDATES[0])
+  wlog(`no bindable candidate found, falling back to ${WEB_PORT_CANDIDATES[0]}`)
+}
+
 function listenerPidOnWebPort() {
   try {
+    // 端口后须为空白边界，避免 :2180 误匹配 :21800 这类临时端口
+    const pat = new RegExp(`:${webPort}\\s`)
     if (IS_WIN) {
       const out = spawnSync(path.join(SYS32, 'netstat.exe'), ['-ano'], { encoding: 'utf8' }).stdout || ''
-      const line = out.split(/\r?\n/).find((l) => l.includes(':3180') && /LISTENING/i.test(l))
+      const line = out.split(/\r?\n/).find((l) => pat.test(l) && /LISTENING/i.test(l))
       if (!line) return null
       const pid = parseInt(line.trim().split(/\s+/).pop(), 10)
       return Number.isInteger(pid) ? pid : null
     }
-    // POSIX: lsof -t -i :3180
-    const out = spawnSync('lsof', ['-t', '-i', ':3180'], { encoding: 'utf8' }).stdout || ''
+    // POSIX: lsof -t -i :<port>
+    const out = spawnSync('lsof', ['-t', '-i', `:${webPort}`], { encoding: 'utf8' }).stdout || ''
     const pid = parseInt(out.trim().split(/\r?\n/)[0], 10)
     return Number.isInteger(pid) ? pid : null
   } catch {
@@ -151,7 +211,7 @@ function startDsh() {
   launchToken = null // 新进程 token 变化，重置以便重新解析
   webAuthCookie = null
   if (IS_WIN) {
-    dshChild = spawn('cmd', ['/c', 'pnpm dsh web --port 3180 --no-open'], {
+    dshChild = spawn('cmd', ['/c', `pnpm dsh web --port ${webPort} --no-open`], {
       cwd: REPO_DIR,
       env: { ...process.env, DSH_HOME: DSH_HOME_DIR },
       windowsHide: true,
@@ -159,7 +219,7 @@ function startDsh() {
     })
   } else {
     // POSIX: 直接 spawn pnpm（detached 独立进程组，便于整组终止）
-    dshChild = spawn('pnpm', ['dsh', 'web', '--port', '3180', '--no-open'], {
+    dshChild = spawn('pnpm', ['dsh', 'web', '--port', String(webPort), '--no-open'], {
       cwd: REPO_DIR,
       env: { ...process.env, DSH_HOME: DSH_HOME_DIR },
       detached: true,
@@ -182,7 +242,7 @@ function readLaunchToken() {
   try {
     // dsh-web.log 为追加日志：取最后一次匹配（当前进程的 token 在文件末尾；match 取首个会拿到历史旧 token）
     const log = fs.readFileSync(path.join(DIR, 'dsh-web.log'), 'utf8')
-    const all = [...log.matchAll(/dsh web: http:\/\/127\.0\.0\.1:3180\/\?token=([A-Za-z0-9_-]+)/g)]
+    const all = [...log.matchAll(new RegExp(`dsh web: http://127\\.0\\.0\\.1:${webPort}/\\?token=([A-Za-z0-9_-]+)`, 'g'))]
     if (all.length) return all[all.length - 1][1]
   } catch { /* 日志可能尚未写入 */ }
   return null
@@ -195,9 +255,9 @@ function getLaunchToken() {
 }
 function webUrlWithToken() {
   const t = getLaunchToken()
-  return t ? `http://127.0.0.1:3180/?token=${t}` : WEB_URL
+  return t ? `http://127.0.0.1:${webPort}/?token=${t}` : WEB_URL
 }
-// token→cookie 交换：带 token 请求 /，捕获 Set-Cookie（authority 绑定 127.0.0.1:3180）
+// token→cookie 交换：带 token 请求 /，捕获 Set-Cookie（authority 绑定 127.0.0.1:<webPort>）
 // 注意：Node.js 的 fetch 遵循 WHATWG 规范，Set-Cookie 为 forbidden response-header，
 // 无法通过 res.headers.get('set-cookie') 读取，必须用 http.request 手动获取。
 async function ensureWebAuthCookie() {
@@ -206,7 +266,7 @@ async function ensureWebAuthCookie() {
   if (!t) return false
   try {
     const sc = await new Promise((resolve) => {
-      const req = http.request({ host: '127.0.0.1', port: 3180, path: '/?token=' + t, method: 'GET' }, (res) => {
+      const req = http.request({ host: '127.0.0.1', port: webPort, path: '/?token=' + t, method: 'GET' }, (res) => {
         const h = res.headers['set-cookie']
         resolve(h ? (Array.isArray(h) ? h[0] : h) : null)
       })
@@ -279,10 +339,17 @@ async function watchdogTick() {
     return
   }
   wlog(`backend unreachable (${failures}/${MAX_CONSECUTIVE_FAILURES}, ${probe.detail}), restarting...`)
-  // 重启前先探测端口：外部进程占用（如哑进程占 3180 但不响应 HTTP）时
+  // 运行期端口落进 Windows 保留段（EACCES）时重选端口，否则 spawn 必失败、会一路耗到放弃上限
+  if (await probeBind(webPort) === 'reserved') {
+    wlog(`web port ${webPort} is now reserved by Windows, reselecting`)
+    await selectWebPort()
+    failures = 0
+    return
+  }
+  // 重启前先探测端口：外部进程占用（如哑进程占端口但不响应 HTTP）时
   // 不反复 spawn（bind 必失败），改为等待外部实例退出后自动接管
-  if (await portInUse(3180)) {
-    wlog('port 3180 busy by external process, waiting without spawn')
+  if (await portInUse(webPort)) {
+    wlog(`port ${webPort} busy by external process, waiting without spawn`)
     failures = 0 // 不计入失败，避免触发放弃上限
     return
   }
@@ -416,7 +483,7 @@ const OVERLAY_INJECT = `(() => {
   toolbar.appendChild(mkTool('dsh-desktop-migrate', '工作区迁移：选择新位置并把整个工作区（dsh-home）搬过去', '<span style="font-size:14px">\\uD83D\\uDCE4</span> 迁移'))
   toolbar.appendChild(mkTool('dsh-desktop-update', '备份更新：将当前对话存档合并进既有备份 zip', '<span style="font-size:14px">\\uD83D\\uDD04</span> 备份更新'))
   toolbar.appendChild(mkTool('dsh-desktop-restore', '从备份 zip 还原对话存档（当前会话自动留底可回退）', '<span style="font-size:14px">\\uD83D\\uDCE5</span> 恢复'))
-  toolbar.appendChild(mkTool('dsh-desktop-lan-toggle', '局域网转发开关：局域网设备经确认后可访问本机（3280→3180）', '<span style="font-size:14px">\\uD83C\\uDF10</span> 局域网'))
+  toolbar.appendChild(mkTool('dsh-desktop-lan-toggle', '局域网转发开关：局域网设备经确认后可访问本机（3280→本机 DSH 端口）', '<span style="font-size:14px">\\uD83C\\uDF10</span> 局域网'))
   overlay.appendChild(toolbar)
   document.body.appendChild(overlay)
   // 底部状态栏：后端在线状态（页面内轮询）/ 端口 / 工作区路径 / 版本
@@ -468,7 +535,6 @@ const OVERLAY_INJECT = `(() => {
   document.body.dataset.dshOverlayH = String(h)
 })()`
 
-const WEB_PORT = new URL(WEB_URL).port
 const APP_VERSION = '0.1.0' // 与 desktop/package.json 同步
 
 // 本机局域网 IP（状态栏显示用）：取第一个非内部 IPv4，优先常见局域网段
@@ -688,7 +754,7 @@ async function migrateWorkspace() {
   }
 }
 
-// —— 局域网转发 + 确认鉴权（不修改 harness；0.0.0.0:3280 → 127.0.0.1:3180）——
+// —— 局域网转发 + 确认鉴权（不修改 harness；0.0.0.0:3280 → 127.0.0.1:<选定的 DSH 端口>）——
 // 设计：默认关闭；开启后局域网设备访问转发端口先见"申请页"→ 电脑端弹确认 → 授权
 // 后下发持久 Cookie（lan-auth.json 记录），局域网状态不变则确权不失效。可一键撤销。
 const LAN_PORT = 3280
@@ -731,11 +797,11 @@ function lanAuthorized(req) {
 }
 
 function proxyHttp(req, res) {
-  const headers = { ...req.headers, host: '127.0.0.1:3180' }
+  const headers = { ...req.headers, host: `127.0.0.1:${webPort}` }
   // 上游 0.1.2：/ 与 /api 需要 dsh 会话 cookie；LAN 授权 cookie 不传给 dsh
   delete headers.cookie
   if (webAuthCookie) headers.cookie = webAuthCookie
-  const p = http.request({ host: '127.0.0.1', port: 3180, path: req.url, method: req.method, headers }, (pres) => {
+  const p = http.request({ host: '127.0.0.1', port: webPort, path: req.url, method: req.method, headers }, (pres) => {
     res.writeHead(pres.statusCode, pres.headers)
     pres.pipe(res)
   })
@@ -744,11 +810,11 @@ function proxyHttp(req, res) {
 }
 
 function proxyUpgrade(req, socket, head) {
-  const headers = { ...req.headers, host: '127.0.0.1:3180' }
+  const headers = { ...req.headers, host: `127.0.0.1:${webPort}` }
   delete headers.cookie
   if (webAuthCookie) headers.cookie = webAuthCookie
   const p = http.request({
-    host: '127.0.0.1', port: 3180, path: req.url,
+    host: '127.0.0.1', port: webPort, path: req.url,
     headers,
   })
   p.on('upgrade', (pres, psocket, phead) => {
@@ -1123,7 +1189,7 @@ async function openShellWindow() {
         out.ws = await new Promise((resolve) => {
           let settled = false
           const done = (x) => { if (!settled) { settled = true; resolve(x) } }
-          const ws = new WebSocket('ws://127.0.0.1:3180/api/remote.mux')
+          const ws = new WebSocket('ws://127.0.0.1:${WEB_PORT}/api/remote.mux')
           ws.onopen = () => done('OPEN')
           ws.onerror = (e) => done('ERROR')
           ws.onclose = (e) => done('CLOSE ' + e.code)
@@ -1156,12 +1222,15 @@ function quitApp(stopBackend) {
 }
 
 // ================= 主流程 =================
-function main() {
+async function main() {
   // 未打包应用设置 AUMID（仅 Windows）：任务栏图标正确跟随窗口 icon，分组与任务栏行为更稳定
   if (IS_WIN) app.setAppUserModelId('com.svpts.deepseek-harness-local')
   fs.writeFileSync(PID_FILE, String(process.pid))
   fs.rmSync(STOP_FILE, { force: true }) // 清掉可能残留的停止标记
-  wlog(`tray app started (pid ${process.pid})${SMOKE ? ' (smoke)' : ''}${AUTOQUIT ? ' (autoquit)' : ''}`)
+  // 先选定可用 Web 端口（跳过 Windows 保留段/非 HTTP 占用），再启看门狗与开窗——
+  // 否则端口落进保留段时 dsh 每次都 EACCES 启动失败，一路耗到"放弃自动重启"
+  await selectWebPort()
+  wlog(`tray app started (pid ${process.pid})${SMOKE ? ' (smoke)' : ''}${AUTOQUIT ? ' (autoquit)' : ''} (web port ${webPort})`)
 
   tray = new Tray(TRAY_ICON)
   tray.setToolTip('DeepSeek Harness')

@@ -26,7 +26,9 @@
 | 2026-08-17 | 升级 dsh 至 **v0.1.0-rc.7**（47f943859b→99f6f02fec，111 提交）；因 Windows 动态端口保留段（2993-3092）覆盖原 3080 导致 EACCES，**端口整体迁移 3080→3180**（`--port 3180` 参数 + 全链路改造），烟测通过 |
 | 2026-08-29 | 升级 dsh 至 **v0.1.2-alpha.1**（99f6f02fec→cd5ef81481，1822 提交）；上游新增 **Web 浏览器启动鉴权**（每次启动随机 token，`/` 无 token 401，`/?token=` 换会话 cookie，`/api` 与 WS 均需 cookie），**WS 路径 `/api/events.mux`→`/api/remote.mux`**；壳适配：`--no-open` 关闭自动开浏览器、从 dsh-web.log 解析 token（取最后一次匹配）、主进程用 `http.request` 做 token→cookie 交换（fetch 读不到 Set-Cookie）、`isWebUp`/`isApiUp`/LAN 代理均带 cookie；烟测与重启闭环通过 |
 | 2026-09-13 | 升级 dsh 至 **v0.1.5-rc.2**（cd5ef81481→c291e7961a，2285 提交）；上游版本快速迭代（0.1.3/0.1.4/0.1.5），壳侧适配逻辑无需变更（token 鉴权 + WS 路径已稳定）；烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN 转发 `LAN-WS-OPEN` 全通过 |
-| 2026-09-15 | 升级 dsh 至 **v0.1.6-alpha.1**（c291e7961a→0d1f50007f，666 提交）；壳侧适配逻辑仍无需变更；烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN 转发 `HTTP 200`+`LAN-WS-OPEN` 全通过。**注意**：本轮实测该版本在「端口残留 + 快速连续 spawn」场景下出现 `0xC0000005`（exit 3221225477）启动崩溃（8 次隔离运行中 1 次、烟测首次因端口残留连续 4 次触发看门狗放弃重启）；彻底清理端口后单实例稳定运行 60 秒无异常、重跑烟测通过。**升级/重启前务必确认 3180 无残留监听进程**（见 §8-30） |
+| 2026-09-15 | 升级 dsh 至 **v0.1.6-alpha.1**（c291e7961a→0d1f50007f，666 提交）；壳侧适配逻辑仍无需变更；烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN 转发 `HTTP 200`+`LAN-WS-OPEN` 全通过。**注意**：本轮实测该版本在「端口残留 + 快速连续 spawn」场景下出现 `0xC0000005`（exit 3221225477）启动崩溃（8 次隔离运行中 1 次、烟测首次因端口残留连续 4 次触发看门狗放弃重启）；彻底清理端口后单实例稳定运行 60 秒无异常、重跑烟测通过。**升级/重启前建议确认端口无残留监听进程**（见 §8-30；2026-09-16 起端口改为启动时自动选定，见 §6） |
+
+| 2026-09-16 | **修复"后端 DSH 起不来"**：Windows 动态保留段漂移为 `3171-3270`，把固定端口 3180 圈进去 → dsh 每次 `listen EACCES`，看门狗连试 4 次后放弃自动重启。改为**壳启动时按候选表实测选定端口**（`3180/2180/4180/6180/8180`，自动跳过保留段与非 HTTP 占用），运行期端口变保留段也会自动重选；启停脚本端口兜底清理同步遍历候选表。实测：自动切到 2180，烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN`、停止脚本清理 2180 残留全部通过 |
 
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
@@ -113,9 +115,9 @@
 
 | 端点 | 用途 |
 |---|---|
-| `http://127.0.0.1:3180` | dsh Web UI（仅监听本机；官方暂不支持 --host 0.0.0.0）。**0.1.2 起需启动 token**：`/?token=<随机>` 换取会话 cookie 后进入 |
-| `http://127.0.0.1:3180/api/*` | 宿主 API 前缀（浏览器端 RPC 上行；需会话 cookie） |
-| `ws://127.0.0.1:3180/api/remote.mux` | 浏览器端 WebSocket 下行（0.1.2 起由 events.mux 改名；需会话 cookie；就绪判据：握手成功） |
+| `http://127.0.0.1:<DSH 端口>` | dsh Web UI（仅监听本机；官方暂不支持 --host 0.0.0.0）。**端口启动时实测选定**（候选 `3180/2180/4180/6180/8180`，跳过 Windows 保留段；实际值见状态栏"端口"）。**0.1.2 起需启动 token**：`/?token=<随机>` 换取会话 cookie 后进入 |
+| `http://127.0.0.1:<DSH 端口>/api/*` | 宿主 API 前缀（浏览器端 RPC 上行；需会话 cookie） |
+| `ws://127.0.0.1:<DSH 端口>/api/remote.mux` | 浏览器端 WebSocket 下行（0.1.2 起由 events.mux 改名；需会话 cookie；就绪判据：握手成功） |
 | `http://127.0.0.1:11434/v1` | Ollama OpenAI 兼容端点（settings.yaml 中 `ollama-local` provider） |
 
 ## 5. 配置详解（dsh-home）
@@ -204,25 +206,37 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 - **让出空间而非覆盖**：注入后量取两栏实际高度（约 83px），给页面 body 加等量 `padding-top`，内容从两栏下方开始、零遮挡（烟测几何验证 `overlap:false`）。
 - 通知机制：**console 标记分派**（页面 `console.log('DSH_DESKTOP_*')` → 壳 `console-message` 必然送达，主通道）+ 自定义协议导航兜底（仅退出按钮保留双通道、带去重）。
 - **弹层避让**（2026-08-19）：dsh 前端弹层类名为 CSS-in-JS 生成（如 `YngKKa_overlay`），注入通用规则 `[class*="_overlay"]{top:var(--dsh-overlay-h)}`（--dsh-overlay-h = 两栏实际高度），设置等弹窗不再被顶栏/功能栏压住；
-- **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 3180` + `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `局域网 开/关`（主进程推送）+ `本机 <局域网 IP>`（主进程 os.networkInterfaces 获取，优先 192.168/10/172.16-31 段）+ `v0.1.0`；body padding-bottom 让位（29px）；
-- **局域网转发 + 确认鉴权**（2026-08-19，不修改 harness）：功能按钮区 `🌐 局域网` 开关 → 主进程起 `0.0.0.0:3280` 反向代理（HTTP + WebSocket 双转发）到 `127.0.0.1:3180`。**默认关闭**；开启后局域网设备访问先见"申请页"（大按钮）→ 电脑端弹确认框 → 授权后下发持久 Cookie（`desktop\lan-auth.json` 记录设备，**已 gitignore**）→ 局域网状态不变则确权不失效；删除该文件即一键撤销。官方 CLI 硬性拒绝 `--host 0.0.0.0`（RCE 风险声明），此方案绕开且保持"人类确认"安全边界；
+- **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 <选定端口>`（启动时实测选定，见下节）+ `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `局域网 开/关`（主进程推送）+ `本机 <局域网 IP>`（主进程 os.networkInterfaces 获取，优先 192.168/10/172.16-31 段）+ `v0.1.0`；body padding-bottom 让位（29px）；
+- **局域网转发 + 确认鉴权**（2026-08-19，不修改 harness）：功能按钮区 `🌐 局域网` 开关 → 主进程起 `0.0.0.0:3280` 反向代理（HTTP + WebSocket 双转发）到 `127.0.0.1:<选定端口>`。**默认关闭**；开启后局域网设备访问先见"申请页"（大按钮）→ 电脑端弹确认框 → 授权后下发持久 Cookie（`desktop\lan-auth.json` 记录设备，**已 gitignore**）→ 局域网状态不变则确权不失效；删除该文件即一键撤销。官方 CLI 硬性拒绝 `--host 0.0.0.0`（RCE 风险声明），此方案绕开且保持"人类确认"安全边界；
 - 页面每次加载（含自动重载循环）后自动重新注入；loading/错误页（data:）不注入；
 4. 冒烟诊断含 `titlebarBtns` / `titlebarOrder` 字段（5 按钮注入与顺序：restart,quit,minimize,maximize,close-window）。
 
+### Web 端口自动选定（2026-09-16 定版）
+
+Windows 的动态保留段会漂移（见 §8-6），固定端口迟早被圈进去导致后端 EACCES 起不来。壳在 `main()` 里**先选定端口再启看门狗与开窗**：
+
+1. 候选表 `WEB_PORT_CANDIDATES = [3180, 2180, 4180, 6180, 8180]`（首选 3180 保持兼容）；
+2. 逐个 `probeBind()` 实测：`free` 直接用；`busy` 且确有 HTTP 响应 → 视为外部 dsh 实例（沿用"只监控不接管"）；落进保留段（`EACCES`）或非 HTTP 占用 → 试下一个；
+3. 选定后写入 `webPort`，同步刷新 `WEB_URL`/`WEB_PORT`（spawn 参数、token 解析正则、cookie 交换、看门狗端口预检查、LAN 代理转发目标、状态栏显示全部跟随）；
+4. **运行期**若端口变保留段，看门狗会重选端口并重启后台，不再一路耗到"放弃自动重启"；
+5. 启停脚本的端口兜底清理遍历同一候选表（`启动`脚本提示复用、`停止`脚本清理残留）。
+
+排查用：`netsh interface ipv4 show excludedportrange protocol=tcp` 看保留段；实际使用的端口见状态栏与 `watchdog.log` 的 `web port selected: N`。
+
 ### 看门狗逻辑（内嵌于 main.cjs）
 
-1. 3180 无服务：`cmd /c pnpm dsh web --port 3180 --no-open` 拉起（cwd=仓库根，注入 `DSH_HOME`；`--no-open` 避免 0.1.2 自动开浏览器）；
+1. `<DSH 端口>` 无服务：`cmd /c pnpm dsh web --port <选定端口> --no-open` 拉起（cwd=仓库根，注入 `DSH_HOME`；`--no-open` 避免 0.1.2 自动开浏览器）；
 2. 健康巡检每 5 秒；**任何 HTTP 响应（含启动期 404）即视为存活**；
 3. **宕机判定以子进程存活为准**（无固定宽限时间）：进程活着就视为"启动中/运行中"绝不误杀（dsh 冷启动随负载波动 10-30 秒）；进程死亡且端口不通才重启；进程存活但 3 分钟不监听视为卡死强制重启；
 4. 崩溃自动重启；连续 4 次真正不可达进入"放弃重启但持续监测"状态（后台恢复后自动复位，不再永久死锁）；
-5. 清理双保险：taskkill 进程树 + 按 3180 监听 PID 兜底（防 tree-kill 漏杀孙进程占端口）；
-6. 3180 已有外部实例：仅监控不接管也不杀；外部实例退出后自动拉起自己的实例；
+5. 清理双保险：taskkill 进程树 + 按选定端口监听 PID 兜底（防 tree-kill 漏杀孙进程占端口）；
+6. 选定端口已有外部实例：仅监控不接管也不杀；外部实例退出后自动拉起自己的实例；
 7. 停止信号：`watchdog.stop` 文件出现 → 置 quitting 标志（杜绝退出竞态）→ 清理自己拉起的实例 → 退出；`watchdog.pid` 写本进程 pid（停止脚本兜底用）；
 8. 单实例锁：`userData` 隔离到 `desktop\electron-userdata`（避免与其它未打包 Electron 应用共用锁），second-instance 唤起窗口。
 
 ### 窗口加载逻辑
 
-1. 窗口先显示 loading 页（即时反馈）→ 等待 3180 就绪（最长 90 秒，超时显示内嵌错误页含排查指引）；
+1. 窗口先显示 loading 页（即时反馈）→ 等待选定端口就绪（最长 90 秒，超时显示内嵌错误页含排查指引）；
 2. `ws` 包握手探测 `/api/remote.mux`（需会话 cookie，open 视为就绪）；
 3. 加载真实 UI；检测到页面 "Failed to load plugins" 时自动等待并重载（最多 7 次，总时限约 2 分钟）。
 
@@ -232,11 +246,11 @@ dsh 0.1.2 起 web 模式引入**启动 token 鉴权**，壳需三处配合：
 
 1. **`--no-open`**：`dsh web` 默认自动打开系统浏览器（0.1.2 行为），壳 spawn 时必须加 `--no-open`，否则每次启动弹浏览器；
 2. **token 捕获**：每次启动随机生成 launch token，URL 打印到 stdout（进 `dsh-web.log`）。壳从日志**取最后一次匹配**（`matchAll` 取末尾，`match` 取首个会拿到历史旧 token 导致 401）；`getLaunchToken` **不缓存**——新进程 spawn 后日志追加新行，缓存会永久卡在旧 token；
-3. **token→cookie 交换**：带 token GET `/` → 303 + `Set-Cookie`（authority 绑定 127.0.0.1:3180）。**必须用 `http.request` 而非 `fetch`**——Node 的 fetch 遵循 WHATWG，`Set-Cookie` 是 forbidden response-header，`res.headers.get('set-cookie')` 永远返回 null（静默失败，曾导致 90s 超时）。换到的 cookie 用于：`isWebUp`（`/` 需 cookie）、`isApiUp`（`/api/remote.mux` 升级需 cookie）、**局域网代理转发**（`proxyHttp`/`proxyUpgrade` 注入 `webAuthCookie`，否则手机访问 401）。窗口加载用 `webUrlWithToken()`（浏览器自动完成 cookie 交换）。
+3. **token→cookie 交换**：带 token GET `/` → 303 + `Set-Cookie`（authority 绑定 `127.0.0.1:<选定端口>`）。**必须用 `http.request` 而非 `fetch`**——Node 的 fetch 遵循 WHATWG，`Set-Cookie` 是 forbidden response-header，`res.headers.get('set-cookie')` 永远返回 null（静默失败，曾导致 90s 超时）。换到的 cookie 用于：`isWebUp`（`/` 需 cookie）、`isApiUp`（`/api/remote.mux` 升级需 cookie）、**局域网代理转发**（`proxyHttp`/`proxyUpgrade` 注入 `webAuthCookie`，否则手机访问 401）。窗口加载用 `webUrlWithToken()`（浏览器自动完成 cookie 交换）。
 
 ### 停止
 
-方式一：托盘右键"退出（停止后台服务）"；方式二：双击 `停止DeepSeek-Harness.bat`（写停止标记走优雅路径 + 3180 监听 PID 兜底清理，幂等）。
+方式一：托盘右键"退出（停止后台服务）"；方式二：双击 `停止DeepSeek-Harness.bat`（写停止标记走优雅路径 + 候选端口监听 PID 兜底清理，幂等）。
 
 ### 烟测（无人值守验证）
 
@@ -276,7 +290,7 @@ cd /d <项目根>\deepseek-harness && pnpm dsh web
 :: —— 停止 ——
 :: 方式零：托盘右键"退出（停止后台服务）"，或双击 <项目根>\停止DeepSeek-Harness.bat（优雅信号+端口兜底，幂等）
 :: 手工兜底：
-netstat -ano | findstr :3180      :: 找到 LISTENING 的 PID
+netstat -ano | findstr LISTENING  :: 找到 DSH 端口的 PID（端口见状态栏；候选 3180/2180/4180/6180/8180）
 taskkill /F /PID <pid>            :: 强制停止（Ctrl+C/SIGTERM 为优雅停止，5 秒排空）
 :: 注意：taskkill 不带 /F 对 node 控制台进程无效（报"只能强制终止"）；脚本化场景一律 /F + 干净重启
 :: WS 就绪探测工具：node dsh-test\probe-ws.cjs（open 或 HTTP_426 视为就绪，同壳逻辑）
@@ -318,7 +332,7 @@ node --import "$TSX_URL" \
 3. **模型能力**：gemma2:9b（旧版）不支持 tools API（Ollama 400）；qwen2.5:7b 工具调用不稳定。均不建议做 agent 模型。
 4. **pnpm 仓库跨盘 mv 会失败/极慢**：workspace 大量包级符号链接无法跨盘重建。正确迁移姿势：删 node_modules → 全新 clone（或 robocopy /MT:16）→ 新位置 `pnpm install && pnpm run build`。
 5. **会话日志为 zstd 多帧容器**：`node:zlib` 的 `zstdDecompressSync` 只解第一帧；需按 magic `28 B5 2F FD`（0x28B52FFD）扫描逐帧解码。
-6. **Windows 保留端口段会 EACCES**：`netsh interface ipv4 show excludedportrange protocol=tcp` 查看保留段；2026-08-17 实测 **2993-3092 段覆盖原 3080**（系统动态预留，重启/服务变化会改变），dsh 用 `--port 3180` 迁移解决。临时服务器用 `listen(0)` 动态端口。
+6. **Windows 动态保留段会 EACCES，且会漂移（已改为自动选端口）**：`netsh interface ipv4 show excludedportrange protocol=tcp` 查看保留段。**该段由系统动态预留（Hyper-V/WSL 等预约），随重启与服务变化改变**：2026-08-17 实测 `2993-3092` 覆盖原 3080（当时用 `--port 3180` 迁移解决）；**2026-09-16 保留段漂移为 `3171-3270`，又把 3180 圈进去**，表现为 dsh 反复 `listen EACCES` 启动失败、看门狗连试 4 次后进入"放弃自动重启"（后端一直起不来）。**定版方案：壳启动时按候选表实测绑定**（`WEB_PORT_CANDIDATES = [3180, 2180, 4180, 6180, 8180]`，见 §6），自动跳过保留段与非 HTTP 占用；运行期端口若变保留段也会自动重选并重启后台。启停脚本的端口兜底清理同步遍历该候选表。临时服务器用 `listen(0)` 动态端口。
 7. **MSYS 的 TaskStop/普通 kill 杀不掉 node/mv 子进程**：按 PID 找进程树（`netstat -ano | findstr :3180`）→ `taskkill //F //PID`（Git Bash 双斜杠）。
 8. **本机会话环境设置了 `ELECTRON_RUN_AS_NODE=1`**（来自 CherryStudio 进程环境继承，非注册表/非 .bashrc）：跑任何 Electron 应用前必须 `unset ELECTRON_RUN_AS_NODE`（或在 cmd 里 `set ELECTRON_RUN_AS_NODE=`），否则 Electron 以纯 Node 运行（`require('electron')` 返回 exe 路径字符串，`app` 为 undefined）。**桌面壳的 `npm start` 已内置自愈（2026-08-16 修复，见 §6-2b），污染环境下可正常启动**；`DSH_HOME` 在 CherryStudio 启动前设置，其派生 shell 可能看不到——重启 CherryStudio 或手动 `export` 即可。2026-08-20 补修：防御分支原先引用尚未 require 的 `fs`，导致错误日志静默丢失（进程直接退出码 1），现已改为分支内 `require('node:fs')`，保证日志必写。
 9. **Electron 37 API 变更**：`BrowserWindow.setWindowOpenHandler` 已移除 → 用 `win.webContents.setWindowOpenHandler`。
