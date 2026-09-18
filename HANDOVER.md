@@ -30,6 +30,8 @@
 
 | 2026-09-16 | **修复"后端 DSH 起不来"**：Windows 动态保留段漂移为 `3171-3270`，把固定端口 3180 圈进去 → dsh 每次 `listen EACCES`，看门狗连试 4 次后放弃自动重启。改为**壳启动时按候选表实测选定端口**（`3180/2180/4180/6180/8180`，自动跳过保留段与非 HTTP 占用），运行期端口变保留段也会自动重选；启停脚本端口兜底清理同步遍历候选表。实测：自动切到 2180，烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN`、停止脚本清理 2180 残留全部通过 |
 
+| 2026-09-18 | 升级 dsh 至 **v0.1.6-alpha.2**（0d1f50007f→ddefc45fbc，882 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。**本轮再次验证动态选端口**：Windows 保留段已从 `3171-3270` 漂移为 `14218-14317`，3180 恢复可用被自动选中（无需人工干预）。**构建期出现 1 次间歇性 `0xC0000005` 崩溃**（tsdown 打包末段，重跑即成功，见 §8-31） |
+
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
 ## 2. 目录结构与资产清单
@@ -47,7 +49,7 @@
 ├── install.bat / install.sh  # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
-├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.6-alpha.1，2026-09-15 升级）
+├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.6-alpha.2，2026-09-18 升级）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
 │   ├── apps\web\dist\           # Web 前端构建产物（vite 输出，约 12MB）
 │   ├── packages\*\*\lib\        # 各 TS 包构建产物（tsc/tsdown 输出）
@@ -332,7 +334,7 @@ node --import "$TSX_URL" \
 3. **模型能力**：gemma2:9b（旧版）不支持 tools API（Ollama 400）；qwen2.5:7b 工具调用不稳定。均不建议做 agent 模型。
 4. **pnpm 仓库跨盘 mv 会失败/极慢**：workspace 大量包级符号链接无法跨盘重建。正确迁移姿势：删 node_modules → 全新 clone（或 robocopy /MT:16）→ 新位置 `pnpm install && pnpm run build`。
 5. **会话日志为 zstd 多帧容器**：`node:zlib` 的 `zstdDecompressSync` 只解第一帧；需按 magic `28 B5 2F FD`（0x28B52FFD）扫描逐帧解码。
-6. **Windows 动态保留段会 EACCES，且会漂移（已改为自动选端口）**：`netsh interface ipv4 show excludedportrange protocol=tcp` 查看保留段。**该段由系统动态预留（Hyper-V/WSL 等预约），随重启与服务变化改变**：2026-08-17 实测 `2993-3092` 覆盖原 3080（当时用 `--port 3180` 迁移解决）；**2026-09-16 保留段漂移为 `3171-3270`，又把 3180 圈进去**，表现为 dsh 反复 `listen EACCES` 启动失败、看门狗连试 4 次后进入"放弃自动重启"（后端一直起不来）。**定版方案：壳启动时按候选表实测绑定**（`WEB_PORT_CANDIDATES = [3180, 2180, 4180, 6180, 8180]`，见 §6），自动跳过保留段与非 HTTP 占用；运行期端口若变保留段也会自动重选并重启后台。启停脚本的端口兜底清理同步遍历该候选表。临时服务器用 `listen(0)` 动态端口。
+6. **Windows 动态保留段会 EACCES，且会漂移（已改为自动选端口）**：`netsh interface ipv4 show excludedportrange protocol=tcp` 查看保留段。**该段由系统动态预留（Hyper-V/WSL 等预约），随重启与服务变化改变**：2026-08-17 实测 `2993-3092` 覆盖原 3080（当时用 `--port 3180` 迁移解决）；**2026-09-16 保留段漂移为 `3171-3270`，又把 3180 圈进去**，表现为 dsh 反复 `listen EACCES` 启动失败、看门狗连试 4 次后进入"放弃自动重启"（后端一直起不来）。**2026-09-18 再次漂移为 `14218-14317`，3180 又恢复可用**（壳自动选回 3180，无需人工干预）。保留段的反复漂移正说明"固定端口"不可靠。**定版方案：壳启动时按候选表实测绑定**（`WEB_PORT_CANDIDATES = [3180, 2180, 4180, 6180, 8180]`，见 §6），自动跳过保留段与非 HTTP 占用；运行期端口若变保留段也会自动重选并重启后台。启停脚本的端口兜底清理同步遍历该候选表。临时服务器用 `listen(0)` 动态端口。
 7. **MSYS 的 TaskStop/普通 kill 杀不掉 node/mv 子进程**：按 PID 找进程树（`netstat -ano | findstr :3180`）→ `taskkill //F //PID`（Git Bash 双斜杠）。
 8. **本机会话环境设置了 `ELECTRON_RUN_AS_NODE=1`**（来自 CherryStudio 进程环境继承，非注册表/非 .bashrc）：跑任何 Electron 应用前必须 `unset ELECTRON_RUN_AS_NODE`（或在 cmd 里 `set ELECTRON_RUN_AS_NODE=`），否则 Electron 以纯 Node 运行（`require('electron')` 返回 exe 路径字符串，`app` 为 undefined）。**桌面壳的 `npm start` 已内置自愈（2026-08-16 修复，见 §6-2b），污染环境下可正常启动**；`DSH_HOME` 在 CherryStudio 启动前设置，其派生 shell 可能看不到——重启 CherryStudio 或手动 `export` 即可。2026-08-20 补修：防御分支原先引用尚未 require 的 `fs`，导致错误日志静默丢失（进程直接退出码 1），现已改为分支内 `require('node:fs')`，保证日志必写。
 9. **Electron 37 API 变更**：`BrowserWindow.setWindowOpenHandler` 已移除 → 用 `win.webContents.setWindowOpenHandler`。
@@ -357,6 +359,7 @@ node --import "$TSX_URL" \
 28. **外部代码审查（Gemini）核对结论**：其"潜在隐患"多数不成立（taskkill /T /F、PowerShell Bypass、Token 授权均早已实现；`.env` 只有占位符无真 Key）。据此落实两项真实改进（2026-08-19）：①局域网授权 Cookie 加 `HttpOnly`（防页面 JS 窃取 token）；②看门狗 spawn 前 TCP 预探测 3180（外部进程占端口时不再无谓 spawn，`portInUse` 用 `net.connect` 探测；外部实例退出后自动接管，实测：占用时 spawn 0 次、释放后 2 秒自动拉起）。
 29. **上游 0.1.2 token 鉴权的三个坑**（2026-08-29 升级实测）：①**token 解析必须取日志最后一次匹配**——`dsh-web.log` 是追加日志，`match` 取首个会拿到历史旧进程的 token，交换必然 401；②**token 不能缓存**——`startDsh` 重置后若缓存了 spawn 前的旧值（可能来自更早实例），新进程写入日志后也永不更新，导致 `waitWebUp=false` 永久超时；③**cookie 交换必须用 `http.request` 而非 `fetch`**——Node fetch 按 WHATWG 规范屏蔽 `Set-Cookie` 响应头（forbidden response-header），`res.headers.get('set-cookie')` 恒为 null，交换静默失败且无报错，症状同样是 90 秒超时。诊断路径：`bootWindow: waitWebUp=false` 时先查 `dsh-web.log` 是否有新 `dsh web: ...token=` 行、再手工 `curl -D - "http://127.0.0.1:3180/?token=<新token>"` 验证 303+Set-Cookie。
 30. **端口残留 + 快速连续 spawn 会触发 dsh 0.1.6 启动崩溃**（2026-09-15 实测）：dsh 0.1.6-alpha.1 在 3180 仍处于残留/TIME_WAIT 状态时被立刻重新拉起，出现 `0xC0000005`（exit 3221225477，无任何输出即死）；看门狗 5 秒间隔连试 4 次全崩后进入"放弃自动重启"（日志：`backend unreachable 4 times in a row, giving up on auto-restart`）。**处理**：彻底清端口（`netstat -ano | grep :3180` 取 PID → `taskkill //F //PID`）并等 3-5 秒再启动，单实例长跑 60 秒稳定。**升级/重启前务必确认 3180 无残留监听**。该现象疑似上游该版本的启动竞态（隔离 8 次运行复现 1 次），非壳缺陷。
+31. **本机存在间歇性 `0xC0000005`（ACCESS_VIOLATION）崩溃，遇崩先重跑一次**（2026-09-18 实测）：`pnpm run build` 在 tsdown 打包**末段**（已输出 `[@deepseek-ai/dsh-desktop] [CJS] 1 files` 之后）双进程同时崩 `3221225477`，`build:lib` 报错退出且 `packages/*/lib` 未生成；**不做任何变更直接重跑即成功**（248 client artifacts）。与 §8-30 的 dsh 启动崩溃同错误码，且内存充足（95.6GB 总量、54GB 可用），排除 OOM。推断为本机安全软件/原生模块（rolldown/rolldown native binding）的间歇性干扰，**非上游代码缺陷、非壳缺陷**。判据与处置：报错码为 `3221225477` 且日志无 JS 异常栈时，先重跑一次再排查。
 
 ## 9. 数据与日志位置
 
