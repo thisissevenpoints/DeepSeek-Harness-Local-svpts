@@ -32,6 +32,8 @@
 
 | 2026-09-18 | 升级 dsh 至 **v0.1.6-alpha.2**（0d1f50007f→ddefc45fbc，882 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。**本轮再次验证动态选端口**：Windows 保留段已从 `3171-3270` 漂移为 `14218-14317`，3180 恢复可用被自动选中（无需人工干预）。**构建期出现 1 次间歇性 `0xC0000005` 崩溃**（tsdown 打包末段，重跑即成功，见 §8-31） |
 
+| 2026-09-24 | 升级 dsh 至 **v0.1.7-rc.2**（ddefc45fbc→477b4f420553，1963 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。**本轮遇到上游 `pnpm run clean` 自身失效**（新配置 outDir 违例抛错），且旧版本遗留的**孤儿包目录**导致 `MISSING_EXPORT` 构建失败 —— 改用等效外科式清理解决，见 §8-32 |
+
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
 ## 2. 目录结构与资产清单
@@ -49,7 +51,7 @@
 ├── install.bat / install.sh  # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
-├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.6-alpha.2，2026-09-18 升级）
+├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.7-rc.2，2026-09-24 升级）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
 │   ├── apps\web\dist\           # Web 前端构建产物（vite 输出，约 12MB）
 │   ├── packages\*\*\lib\        # 各 TS 包构建产物（tsc/tsdown 输出）
@@ -85,6 +87,7 @@
     ├── DSH-部署报告.md           # 部署报告（验收记录、命令清单、风险提示）
     ├── no-runtime-context.yml    # 本地小模型 headless 补丁（见 §8-1）
     ├── probe-ws.cjs              # WS 就绪探测工具（复用 desktop 的 ws 依赖，见 §7）
+    ├── surgical-clean.js         # 升级时清理子模块构建产物的等效工具（替代失效的上游 clean，见 §8-32）
     ├── webtest-web.log           # 2026-08-16 全量回归：Web 模式运行日志
     ├── fulltest-aug16\hello.txt  # 2026-08-16 全量回归 headless 产物（内容 "Hello"）
     ├── hello-workspace-760\hello.txt    # 迁移前验收产物（内容 "Hello"）
@@ -298,8 +301,12 @@ taskkill /F /PID <pid>            :: 强制停止（Ctrl+C/SIGTERM 为优雅停�
 :: WS 就绪探测工具：node dsh-test\probe-ws.cjs（open 或 HTTP_426 视为就绪，同壳逻辑）
 
 :: —— 升级 ——
-cd /d <项目根>\deepseek-harness
-git pull && pnpm install && pnpm run build
+:: 先停应用（停止DeepSeek-Harness.bat），再更新子模块到上游最新提交
+cd /d <项目根>\deepseek-harness && git fetch origin && git checkout origin/master
+:: 清理旧产物：上游 pnpm run clean 目前自身失效（见 §8-32），用等效工具代替
+cd /d <项目根> && node dsh-test\surgical-clean.js
+:: 手工删除孤儿包目录（无 package.json 且 git ls-files 为空者，见 §8-32）
+cd /d <项目根>\deepseek-harness && pnpm install && pnpm run build
 
 :: —— 验证 ——
 curl -sI http://127.0.0.1:3180                                :: 期望 200
@@ -360,6 +367,7 @@ node --import "$TSX_URL" \
 29. **上游 0.1.2 token 鉴权的三个坑**（2026-08-29 升级实测）：①**token 解析必须取日志最后一次匹配**——`dsh-web.log` 是追加日志，`match` 取首个会拿到历史旧进程的 token，交换必然 401；②**token 不能缓存**——`startDsh` 重置后若缓存了 spawn 前的旧值（可能来自更早实例），新进程写入日志后也永不更新，导致 `waitWebUp=false` 永久超时；③**cookie 交换必须用 `http.request` 而非 `fetch`**——Node fetch 按 WHATWG 规范屏蔽 `Set-Cookie` 响应头（forbidden response-header），`res.headers.get('set-cookie')` 恒为 null，交换静默失败且无报错，症状同样是 90 秒超时。诊断路径：`bootWindow: waitWebUp=false` 时先查 `dsh-web.log` 是否有新 `dsh web: ...token=` 行、再手工 `curl -D - "http://127.0.0.1:3180/?token=<新token>"` 验证 303+Set-Cookie。
 30. **端口残留 + 快速连续 spawn 会触发 dsh 0.1.6 启动崩溃**（2026-09-15 实测）：dsh 0.1.6-alpha.1 在 3180 仍处于残留/TIME_WAIT 状态时被立刻重新拉起，出现 `0xC0000005`（exit 3221225477，无任何输出即死）；看门狗 5 秒间隔连试 4 次全崩后进入"放弃自动重启"（日志：`backend unreachable 4 times in a row, giving up on auto-restart`）。**处理**：彻底清端口（`netstat -ano | grep :3180` 取 PID → `taskkill //F //PID`）并等 3-5 秒再启动，单实例长跑 60 秒稳定。**升级/重启前务必确认 3180 无残留监听**。该现象疑似上游该版本的启动竞态（隔离 8 次运行复现 1 次），非壳缺陷。
 31. **本机存在间歇性 `0xC0000005`（ACCESS_VIOLATION）崩溃，遇崩先重跑一次**（2026-09-18 实测）：`pnpm run build` 在 tsdown 打包**末段**（已输出 `[@deepseek-ai/dsh-desktop] [CJS] 1 files` 之后）双进程同时崩 `3221225477`，`build:lib` 报错退出且 `packages/*/lib` 未生成；**不做任何变更直接重跑即成功**（248 client artifacts）。与 §8-30 的 dsh 启动崩溃同错误码，且内存充足（95.6GB 总量、54GB 可用），排除 OOM。推断为本机安全软件/原生模块（rolldown/rolldown native binding）的间歇性干扰，**非上游代码缺陷、非壳缺陷**。判据与处置：报错码为 `3221225477` 且日志无 JS 异常栈时，先重跑一次再排查。
+32. **升级时不要依赖上游 `pnpm run clean`，改用 `dsh-test\surgical-clean.js`**（2026-09-24 实测）：上游 0.1.7-rc.2 新增了跟踪文件 `tsconfig.desktop-keyboard-tests.json`，其 `outDir` 为 `lib/desktop-keyboard-test-types`（**不以 `/types` 结尾**），而 `scripts/clean.ts` 在**规划阶段**就对所有 tsconfig 的 outDir 做强校验，直接抛 `clean: expected TypeScript outDir to end in /types` 并中止 —— **整个 clean 无法运行，一个文件也没删**（上游自身脚本的缺陷；按"不修改上游"原则不作改动）。后果：跨越多个版本升级时，旧版本遗留的**孤儿包目录**（上游已删除的包，本地只剩 `lib/` + `node_modules`、无 `package.json`/`src`）与新版本源码冲突，rolldown 报 `MISSING_EXPORT`（本次为 `SettingsProvider`，由孤儿 `packages/settings/settings-file/lib/types/index.js` 引起）。**处置**：`node dsh-test\surgical-clean.js` 等效清理（删除 `lib/`/`dist/`/`.dsh-build`/`*.tsbuildinfo`，保留 `node_modules`），另需手工删除孤儿包目录 —— 判据为「目录下无 `package.json` 且 `git ls-files <dir>` 为空」（本次 5 个：`packages/settings/settings-file`、`packages/preset/agent-presets`、`packages/client/ui-settings-unarchive-sessions`、`packages/experimental/agent-team-web-profile`、`native/landlock-run`）。
 
 ## 9. 数据与日志位置
 
