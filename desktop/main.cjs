@@ -1170,14 +1170,27 @@ async function openShellWindow() {
         const ov = document.getElementById('dsh-desktop-overlay')
         if (!ov) return 'NO_OVERLAY'
         const ovBottom = ov.getBoundingClientRect().bottom
-        const topEl = [...document.querySelectorAll('body *')]
-          .filter((el) => {
-            if (el.closest('#dsh-desktop-overlay')) return false
-            const r = el.getBoundingClientRect()
-            return r.height > 4 && r.width > 4
-          })
-          .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0]
-        const t = topEl ? topEl.getBoundingClientRect().top : -1
+        // 注意：此处位于外层模板字符串内，只能拼接字符串（反引号或美元花括号会终止外层模板）
+        const describe = (el) => {
+          const r = el.getBoundingClientRect()
+          return el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + '.'
+            + String(el.className || '').slice(0, 40)
+            + ' top=' + Math.round(r.top) + ' pos=' + getComputedStyle(el).position
+        }
+        const all = [...document.querySelectorAll('body *')].filter((el) => {
+          if (el.closest('#dsh-desktop-overlay')) return false
+          const r = el.getBoundingClientRect()
+          return r.height > 4 && r.width > 4
+        }).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
+        // 文档流元素（排除 fixed/absolute 装饰层）才是"被遮挡的内容"判据；
+        // 同时保留原始全量列表，避免指标收窄掩盖真实遮挡
+        const flow = all.filter((el) => {
+          const pos = getComputedStyle(el).position
+          return pos !== 'fixed' && pos !== 'absolute'
+        })
+        out.topElementsRaw = all.slice(0, 5).map(describe)
+        out.topElementsFlow = flow.slice(0, 5).map(describe)
+        const t = flow[0] ? flow[0].getBoundingClientRect().top : -1
         return JSON.stringify({ overlayBottom: Math.round(ovBottom), topContentTop: Math.round(t), overlap: t < ovBottom })
       })()
       out.bodyText = document.body ? document.body.innerText.slice(0, 300) : '(no body)'

@@ -34,6 +34,8 @@
 
 | 2026-09-24 | 升级 dsh 至 **v0.1.7-rc.2**（ddefc45fbc→477b4f420553，1963 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。**本轮遇到上游 `pnpm run clean` 自身失效**（新配置 outDir 违例抛错），且旧版本遗留的**孤儿包目录**导致 `MISSING_EXPORT` 构建失败 —— 改用等效外科式清理解决，见 §8-32 |
 
+| 2026-10-03 | 升级 dsh 至 **v0.2.0-rc.2**（477b4f420553→da00f7f5358f，706 提交；**次版本号提升** 0.1.x→0.2.0）；壳侧适配逻辑无需变更（token 鉴权 + `/api/remote.mux` + 端口自动选定均照常工作）。烟测 `ws=OPEN`+6 功能按钮、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。按 §8-32 流程又清理 1 个孤儿包目录（`packages/runtime-diagnostics`，上游 0.2.0 移除该组）。另修正烟测遮挡判据（0.2.0 新增 fixed/absolute 装饰层致旧判据误报，见 §6），确认真实内容零遮挡 |
+
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
 ## 2. 目录结构与资产清单
@@ -51,7 +53,7 @@
 ├── install.bat / install.sh  # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
-├── deepseek-harness\            # dsh 源码仓库（git master，v0.1.7-rc.2，2026-09-24 升级）
+├── deepseek-harness\            # dsh 源码仓库（git master，v0.2.0-rc.2，2026-10-03 升级）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
 │   ├── apps\web\dist\           # Web 前端构建产物（vite 输出，约 12MB）
 │   ├── packages\*\*\lib\        # 各 TS 包构建产物（tsc/tsdown 输出）
@@ -208,7 +210,7 @@ OLLAMA_PLACEHOLDER_KEY=ollama
   - `🔄 备份更新` —— 弹**图形化打开对话框**选既有备份 zip，将当前对话存档**合并进**该备份（增量更新/跨机累积）；
   - `📥 恢复` —— 弹**图形化打开对话框**选备份 zip 还原（当前会话自动改名留底可回退）；
   - 执行引擎复用 `backup-restore.ps1`（主进程 `dialog` 选路径 → **异步** PowerShell，不阻塞主进程）；完成弹结果框；全局互斥锁防并发；
-- **让出空间而非覆盖**：注入后量取两栏实际高度（约 83px），给页面 body 加等量 `padding-top`，内容从两栏下方开始、零遮挡（烟测几何验证 `overlap:false`）。
+- **让出空间而非覆盖**：注入后量取两栏实际高度（约 83px），给页面 body 加等量 `padding-top`，内容从两栏下方开始、零遮挡（烟测几何验证 `overlap:false`）。**2026-10-03 判据修正**：0.2.0 上游新增了 fixed 定位的装饰根（`_root_o6lrb_6`）与 absolute 遮罩（`_mask_o6lrb_18`），它们本就贴顶全屏、并非内容；旧判据取"最靠顶元素"不区分定位方式，会把它们误判成遮挡（曾误报 `overlap:true`）。现判据只统计**文档流元素**（排除 fixed/absolute），并额外输出 `topElementsRaw`/`topElementsFlow` 两组前 5 元素供对照 —— 实测真实内容（`div#root`、`_frame`、`_sidebarCol`）在 `top=83`，与浮层下沿对齐，零遮挡。
 - 通知机制：**console 标记分派**（页面 `console.log('DSH_DESKTOP_*')` → 壳 `console-message` 必然送达，主通道）+ 自定义协议导航兜底（仅退出按钮保留双通道、带去重）。
 - **弹层避让**（2026-08-19）：dsh 前端弹层类名为 CSS-in-JS 生成（如 `YngKKa_overlay`），注入通用规则 `[class*="_overlay"]{top:var(--dsh-overlay-h)}`（--dsh-overlay-h = 两栏实际高度），设置等弹窗不再被顶栏/功能栏压住；
 - **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 <选定端口>`（启动时实测选定，见下节）+ `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `局域网 开/关`（主进程推送）+ `本机 <局域网 IP>`（主进程 os.networkInterfaces 获取，优先 192.168/10/172.16-31 段）+ `v0.1.0`；body padding-bottom 让位（29px）；
@@ -357,7 +359,7 @@ node --import "$TSX_URL" \
 19. **进程树清理双保险**：taskkill `/T` 可能漏杀脱离进程树的孙进程（实际监听 3180 的 dsh 节点），必须再按 `netstat` 监听 PID 兜底一次；停止脚本的"清理残留实例"行即使已清理也可能出现（netstat 行滞后，无害）。mise shim 启动的 node 进程会显示两个（shim 包装 + 真实进程），属正常。
 20. **Electron 的 ELECTRON_RUN_AS_NODE 陷阱**：值为 `1` **或空字符串**都会进入纯 Node 模式（`app` 为 undefined）！cmd 的 `set "VAR="` 传给子进程时行为不稳定（有时剥除、有时传空串），启动脚本必须用 PowerShell `$env:VAR = $null` **彻底删除**该变量（$null 保证子进程环境无此变量）；MSYS bash 的 `VAR= cmd` 会原样传空串，测试时注意。另外 **必须订阅 `window-all-closed`**，否则 Electron 默认关窗即退出、托盘消失。
 21. **退出竞态防护**：应用退出路径（停止信号/托盘菜单/烟测）必须先置 `quitting` 标志再杀后台，否则退出前的最后一个巡检 tick 会把刚杀掉的实例误判为"崩溃"重新拉起，留下孤儿进程。
-22. **模板字符串（反引号）里 `\s` 会被 JS 解析成 `s`**（非法转义丢弃反斜杠）：烟测诊断/注入脚本里的正则 `/\s+/g` 实际变成 `/s+/g`（把所有字母 s 折叠成空格！）。模板字符串内正则须写 `\\s`。
+22. **模板字符串（反引号）里 `\s` 会被 JS 解析成 `s`**（非法转义丢弃反斜杠）：烟测诊断/注入脚本里的正则 `/\s+/g` 实际变成 `/s+/g`（把所有字母 s 折叠成空格！）。模板字符串内正则须写 `\\s`。**2026-10-03 同类复发**：烟测诊断整段位于外层模板字符串（`executeJavaScript(\`...\`)`）内，我在**注释里写了字面反引号**去说明这件事，结果注释中的反引号直接终止了外层模板 → `SyntaxError: missing ) after argument list`（报错位置在外层模板之后，具有迷惑性）。**规则**：外层模板字符串内（含注释）**禁止出现字面反引号与 `${`**，需要叙述时改写措辞（如"反引号或美元花括号"），拼接字符串也只用 `+`。
 23. **`NoDefaultCurrentDirectoryInExePath=1` 环境变量**（本机存在）：cmd **不搜索当前目录**，bat 内相对名 `call`/执行一律失败（"不是内部或外部命令"）。所有 bat 内跨目录调用必须用绝对路径（`%~dp0` 推导 + `SEP` 变量拼接）。
 24. **submodule 下 dsh 的 lefthook postinstall 失败**（`extensions.worktreeConfig` 冲突，仅影响开发 hooks）：`pnpm install` 会因此报错。部署脚本已宽容处理（依赖已装则继续），且 `pnpm run build` 需加 `--config.verifyDepsBeforeRun=false`（install 部分失败后 pnpm 会拒绝 build）。
 25. **MSYS→node.exe 传参吃反斜杠**：`node -e "含 \ 的字符串"` 经 bash 传参后反斜杠被吞（曾把 `\n` 变成换行、路径分隔符丢失）。需含反斜杠的字符串操作时，用 Write 写 patch.js 文件执行（不经命令行参数）。
