@@ -38,6 +38,8 @@
 
 | 2026-10-11 | 升级 dsh 至 **v0.2.1-alpha.2**（da00f7f5358f→d74326738864，677 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`+几何 `overlap:false`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。上游本轮**大幅重排包结构**（10 个包移入 `packages/experimental/`、1 个删除、3 个组清空），据此**把孤儿清理自动化进 `dsh-test\surgical-clean.js`**（新增孤儿包目录 + 空组目录检测、`--dry-run` 模式），此后升级不再需要手工探测，见 §8-32 |
 
+| 2026-10-22 | 升级 dsh 至 **v0.2.1-rc.2**（d74326738864→687f282e8625，990 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`+几何 `overlap:false`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。本轮上游未再重排包结构（`surgical-clean.js` 报告 0 孤儿/0 空组，仅清构建产物），构建时上游自带 gate 9 项全过 |
+
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
 ## 2. 目录结构与资产清单
@@ -55,7 +57,7 @@
 ├── install.bat / install.sh  # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
-├── deepseek-harness\            # dsh 源码仓库（git master，v0.2.1-alpha.2，2026-10-11 升级）
+├── deepseek-harness\            # dsh 源码仓库（git master，v0.2.1-rc.2，2026-10-22 升级）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
 │   ├── apps\web\dist\           # Web 前端构建产物（vite 输出，约 12MB）
 │   ├── packages\*\*\lib\        # 各 TS 包构建产物（tsc/tsdown 输出）
