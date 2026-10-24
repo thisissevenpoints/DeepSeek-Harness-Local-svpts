@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DeepSeek Harness Local svpts — Linux/macOS 一键部署（等价 Windows 的 部署DeepSeek-Harness.bat）
+# DeepSeek Harness Local svpts — Linux/macOS 一键部署（等价 Windows 的 deploy.cmd）
 # git 拉取后的环境审查与补足；可重复运行（已满足的步骤自动跳过）
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -86,5 +86,5 @@ else
 fi
 
 echo "=========================================="
-echo "  部署完成！接下来：./start.sh 启动；./stop.sh 停止"
+echo "  部署完成！接下来：./startrun.sh 启动；./stopexit.sh 停止"
 echo "=========================================="

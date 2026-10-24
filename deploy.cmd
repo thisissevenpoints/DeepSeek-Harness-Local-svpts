@@ -1,19 +1,14 @@
 @echo off
 setlocal
-rem ============================================================
-rem  DeepSeek Harness Local svpts 一键部署（ASCII 名入口）
-rem  由 部署DeepSeek-Harness.bat / install.bat 调用；
-rem  ASCII 文件名确保任何代码页/区域下 call 均可解析。
-rem ============================================================
-@echo off
-setlocal
 
 rem ============================================================
-rem  DeepSeek Harness Local svpts 一键部署
+rem  DeepSeek Harness Local svpts 一键部署（Windows）
 rem  git 拉取到本地后的环境审查与补足脚本。
-rem  双击即可；可重复运行（已满足的步骤自动跳过）。
-rem  完成所有步骤后，即可双击 启动DeepSeek-Harness.bat 使用。
+rem  双击或由 install.cmd 调用；可重复运行（已满足的步骤自动跳过）。
+rem  完成所有步骤后，即可双击 startrun.cmd 使用。
 rem  首次运行约需 3-10 分钟（取决于网络与磁盘），请勿关闭窗口。
+rem  跨平台对应：Linux/macOS 用 ./deploy.sh
+rem  说明：本脚本使用 ASCII 文件名，任何代码页/区域下均可被 call 解析。
 rem ============================================================
 
 set "ROOT=%~dp0"
@@ -163,12 +158,12 @@ if not exist "%DESKTOP%\node_modules\electron\dist\electron.exe" (
 echo.
 echo ==========================================
 echo   部署完成！接下来：
-echo   1) 双击 启动DeepSeek-Harness.bat  启动托盘应用
-echo   2) 停止：托盘右键"退出"或双击 停止DeepSeek-Harness.bat
+echo   1) 双击 startrun.cmd        启动托盘应用
+echo   2) 停止：托盘右键"退出"或双击 stopexit.cmd
 echo   3) 升级 dsh 后建议先跑一次烟测：
-echo      set DSH_DESKTOP_SMOKE=1 后双击启动脚本
+echo      set DSH_DESKTOP_SMOKE=1 后双击 startrun.cmd
 echo   4) 详细说明见 README.md 与 HANDOVER.md
-echo   5) 备份/恢复对话存档：双击 备份恢复DeepSeek-Harness.bat
+echo   5) 备份/恢复对话存档：双击 backup.cmd
 echo ==========================================
 %SystemRoot%\System32\PING.EXE -n 4 127.0.0.1 >nul
 exit /b 0

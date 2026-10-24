@@ -1,5 +1,5 @@
 ﻿# DeepSeek Harness 工作区备份 / 恢复 / 更新工具
-# 由 备份恢复DeepSeek-Harness.bat 调用；也可命令行直用（自动化测试）：
+# 由 backup.cmd 调用；也可命令行直用（自动化测试）：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File backup-restore.ps1 -Action backup -ZipPath <路径>
 #   -Action: backup（打包）| update（合并进既有备份）| restore（还原）
 #   -ZipPath: 直传路径则跳过文件对话框（批处理/自动化用）

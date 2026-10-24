@@ -6,7 +6,7 @@
 
 | 动作 | 结果 |
 |---|---|
-| 双击 `启动DeepSeek-Harness.bat`（项目根） | 首次启动：托盘图标 + 窗口自动打开（loading 页即时反馈）；已在运行：约 2 秒唤起窗口 |
+| 双击 `startrun.cmd`（项目根） | 首次启动：托盘图标 + 窗口自动打开（loading 页即时反馈）；已在运行：约 2 秒唤起窗口 |
 | 关闭应用窗口 | 回到托盘，**后台继续运行**（会话保持） |
 | 窗口右上角按钮 | `⏻ 完全退出`（确认后停前后端）、`✕ 关闭窗口`（回托盘）、`⛶ 最大化/还原`、`─ 最小化`（无边框自绘顶栏，整条可拖动） |
 | 顶栏下方 `📁 打开会话存档` | 打开 `dsh-home\sessions` 文件夹（功能按钮区，预备扩展） |
@@ -21,13 +21,13 @@
 
 - `main.cjs`：托盘应用主进程。看门狗逻辑（健康巡检每 5 秒、**子进程存活判据**不误杀慢启动、崩溃自动重启、`watchdog.stop` 文件信号、`watchdog.pid` 兜底）+ 窗口逻辑（loading 页 → 就绪后真实 UI）；
 - `tray.png`：托盘图标；
-- `启动DeepSeek-Harness.bat` / `停止DeepSeek-Harness.bat`（项目根）：一键启停（GBK+CRLF 编码，改后需重新转码）。
+- `startrun.cmd` / `stopexit.cmd`（项目根）：一键启停（GBK+CRLF 编码，改后需重新转码）。
 
 ## 使用
 
 ```bat
-:: 日常推荐：双击 <项目根>\启动DeepSeek-Harness.bat
-:: 停止：托盘右键"退出（停止后台服务）"，或双击 <项目根>\停止DeepSeek-Harness.bat
+:: 日常推荐：双击 <项目根>\startrun.cmd
+:: 停止：托盘右键"退出（停止后台服务）"，或双击 <项目根>\stopexit.cmd
 :: 手工方式（需后台已运行）
 cd /d <项目根>\desktop
 npm start
@@ -45,7 +45,7 @@ npm install
 ```bat
 set DSH_DESKTOP_SMOKE=1
 cd /d <项目根>
-启动DeepSeek-Harness.bat
+startrun.cmd
 ```
 
 启动后自动截图 `smoke.png`、抓取页面诊断信息 `smoke.txt`，随后停掉后台并退出（干净状态）。**升级 dsh 后建议先跑一次烟测。**

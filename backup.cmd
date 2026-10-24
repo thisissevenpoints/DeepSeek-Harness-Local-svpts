@@ -2,10 +2,12 @@
 setlocal
 
 rem ============================================================
-rem  DeepSeek Harness 工作区备份 / 恢复 / 更新
+rem  DeepSeek Harness 工作区备份 / 恢复 / 更新（Windows）
 rem  备份 = 对话存档（dsh-home\sessions）打包为 zip
 rem  恢复 = 从 zip 还原（当前会话自动改名留底，可回退）
 rem  更新 = 将当前对话存档合并进既有备份 zip
+rem  执行引擎：backup-restore.ps1（PowerShell 内置压缩，零依赖）
+rem  Linux/macOS：用系统 zip/tar 手动备份（见 README）
 rem ============================================================
 
 set "ROOT=%~dp0"

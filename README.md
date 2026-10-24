@@ -14,26 +14,26 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 
 ### 自举安装（推荐，无需手动 clone）
 
-从仓库页面下载**单个文件** `install.bat`（Windows）或 `install.sh`（Linux/macOS）→ 放到任意目录运行 → **缺失的 git/node/pnpm 自动安装**（Windows 走 winget，Linux/macOS 走系统包管理器或 NodeSource/nvm）→ 自动 clone 仓库（含子模块）并完成部署。**仓库内不含任何不可审查的二进制文件。**
+从仓库页面下载**单个文件** `install.cmd`（Windows）或 `install.sh`（Linux/macOS）→ 放到任意目录运行 → **缺失的 git/node/pnpm 自动安装**（Windows 走 winget，Linux/macOS 走系统包管理器或 NodeSource/nvm）→ 自动 clone 仓库（含子模块）并完成部署。**仓库内不含任何不可审查的二进制文件。**
 
 ### 手动安装
 
 ```bat
-:: 第一步（git 拉取后只需一次，可重复运行）：双击 部署DeepSeek-Harness.bat
+:: 第一步（git 拉取后只需一次，可重复运行）：双击 deploy.cmd
 ::   自动审查 Node/pnpm/git/Ollama，补足 dsh-home/.env、初始化子模块、安装依赖并构建
-:: 启动：双击 启动DeepSeek-Harness.bat
-:: 停止：托盘右键"退出（停止后台服务）"，或双击 停止DeepSeek-Harness.bat
+:: 启动：双击 startrun.cmd
+:: 停止：托盘右键"退出（停止后台服务）"，或双击 stopexit.cmd
 :: 界面功能按钮区：📁打开会话存档 / 💾备份 / 📤迁移（工作区搬移）/ 🔄备份更新 / 📥恢复 / 🌐局域网
 ::   （局域网：默认关；开启后手机访问 http://<本机IP>:3280，首次需电脑端确认授权）
-::   Linux/macOS：./deploy.sh && ./start.sh（停止 ./stop.sh）
+::   Linux/macOS：./deploy.sh && ./startrun.sh（停止 ./stopexit.sh）
 ```
 
 ## 跨平台
 
 | 平台 | 启动 | 停止 | 部署 |
 |---|---|---|---|
-| Windows | 启动DeepSeek-Harness.bat | 停止DeepSeek-Harness.bat | 部署DeepSeek-Harness.bat |
-| Linux / macOS | `./start.sh` | `./stop.sh` | `./deploy.sh` |
+| Windows | startrun.cmd | stopexit.cmd | deploy.cmd |
+| Linux / macOS | `./startrun.sh` | `./stopexit.sh` | `./deploy.sh` |
 
 - 首次启动：托盘图标 + 窗口自动打开（loading 页即时反馈，后台就绪后切入真实 UI）
 - 关闭窗口 = 回到托盘，后台继续运行；再次双击启动脚本约 2 秒唤起窗口
@@ -44,7 +44,7 @@ DeepSeek Harness 的本地部署套件：把 [deepseek-harness](https://github.c
 
 ### 🗂 会话存档（备份 / 恢复 / 迁移）
 
-界面功能栏（或独立菜单 `备份恢复DeepSeek-Harness.bat`）：
+界面功能栏（或独立菜单 `backup.cmd`）：
 
 | 按钮 | 功能 |
 |---|---|
@@ -84,10 +84,11 @@ dsh 官方 CLI **硬性拒绝** `--host 0.0.0.0`（理由：会向网络暴露�
 ## 目录结构
 
 ```
-├── 启动DeepSeek-Harness.bat / 停止DeepSeek-Harness.bat   # 一键启停（GBK+CRLF 编码）
-├── 部署DeepSeek-Harness.bat   # 一键部署：拉取后环境审查与补足（幂等，可重复运行）
-├── 备份恢复DeepSeek-Harness.bat + backup-restore.ps1      # 对话存档备份/恢复/更新（PowerShell 内置压缩，零依赖）
-├── install.bat / install.sh   # 自举安装器（单文件下载即装，见"快速开始"）
+├── startrun.cmd / startrun.sh    # 一键启动（托盘应用；Windows GBK+CRLF）
+├── stopexit.cmd / stopexit.sh    # 一键停止（托盘应用 + 后台服务）
+├── deploy.cmd / deploy.sh        # 一键部署：拉取后环境审查与补足（幂等，可重复运行）
+├── backup.cmd + backup-restore.ps1   # 对话存档备份/恢复/更新（Windows；PowerShell 内置压缩，零依赖）
+├── install.cmd / install.sh      # 自举安装器（单文件下载即装，见"快速开始"）
 ├── references\         # 设计参考项目（本地拉取，已被 .gitignore 排除，不入库）
 ├── desktop\            # 托盘应用（main.cjs 看门狗+窗口、tray.png、package.json）
 ├── deepseek-harness\   # 上游仓库（git submodule，固定到经过验证的提交）

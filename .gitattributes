@@ -1,4 +1,6 @@
 # Windows 批处理：必须 CRLF 入仓（cmd 对 LF-only 批处理的复杂语法支持不佳）
+# 2026-10-24 起入口脚本统一为 .cmd；保留 .bat 规则以兼容历史/外部脚本
+*.cmd text eol=crlf
 *.bat text eol=crlf
 
 # POSIX 脚本：必须 LF 入仓（CRLF 会导致 bash 执行失败）

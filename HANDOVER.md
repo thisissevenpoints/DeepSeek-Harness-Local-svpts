@@ -21,7 +21,7 @@
 | 2026-08-16 下午 | 应需求整体迁移至 <项目根>\（含 `DSH_HOME` 用户环境变量设置）；迁移后全面整理测试（10 项全部通过） |
 | 2026-08-16 晚间 | 制作 Electron 桌面壳（自拉起、自愈、退出清理），烟测通过并交付使用 |
 | 2026-08-16 深夜 | 接手后全量回归：headless 往返、Web 全流程、壳烟测（污染环境自愈验证）、会话管道核查、pnpm 版本机制澄清；修复壳启动脚本对 `ELECTRON_RUN_AS_NODE` 的自愈（`desktop\package.json`） |
-| 2026-08-16 深夜 | 按需改造为**看门狗架构**：新增 `desktop\watchdog.cjs`（后台唯一 owner、崩溃自动重启、停止信号），壳改纯客户端（关窗不停后台），新增 `停止DeepSeek-Harness.bat`，全链路实测通过 |
+| 2026-08-16 深夜 | 按需改造为**看门狗架构**：新增 `desktop\watchdog.cjs`（后台唯一 owner、崩溃自动重启、停止信号），壳改纯客户端（关窗不停后台），新增停止脚本（当时名为 `停止DeepSeek-Harness.bat`，2026-10-24 起改名 `stopexit.cmd`），全链路实测通过 |
 | 2026-08-16 深夜 | 修复启动脚本并定版**托盘应用**：看门狗与壳合并为单一常驻托盘 Electron 应用（右键菜单退出/启动壳、second-instance 唤起、loading 页即时反馈）；修复 Electron 空环境变量 node 模式陷阱、window-all-closed 托盘消失、退出竞态等 4 个缺陷 |
 | 2026-08-17 | 升级 dsh 至 **v0.1.0-rc.7**（47f943859b→99f6f02fec，111 提交）；因 Windows 动态端口保留段（2993-3092）覆盖原 3080 导致 EACCES，**端口整体迁移 3080→3180**（`--port 3180` 参数 + 全链路改造），烟测通过 |
 | 2026-08-29 | 升级 dsh 至 **v0.1.2-alpha.1**（99f6f02fec→cd5ef81481，1822 提交）；上游新增 **Web 浏览器启动鉴权**（每次启动随机 token，`/` 无 token 401，`/?token=` 换会话 cookie，`/api` 与 WS 均需 cookie），**WS 路径 `/api/events.mux`→`/api/remote.mux`**；壳适配：`--no-open` 关闭自动开浏览器、从 dsh-web.log 解析 token（取最后一次匹配）、主进程用 `http.request` 做 token→cookie 交换（fetch 读不到 Set-Cookie）、`isWebUp`/`isApiUp`/LAN 代理均带 cookie；烟测与重启闭环通过 |
@@ -40,6 +40,8 @@
 
 | 2026-10-22 | 升级 dsh 至 **v0.2.1-rc.2**（d74326738864→687f282e8625，990 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`+几何 `overlap:false`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。本轮上游未再重排包结构（`surgical-clean.js` 报告 0 孤儿/0 空组，仅清构建产物），构建时上游自带 gate 9 项全过 |
 
+| 2026-10-24 | 升级 dsh 至 **v0.2.1-rc.3**（687f282e8625→22ddee379240，1539 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`+几何 `overlap:false`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。**同时把入口脚本改为多端统一命名**（`startrun`/`stopexit`/`deploy`/`install`/`backup` + `.cmd`/`.sh`），中文文件名与 `deploy-win.bat` 间接层一并取消；E2E 实测 `startrun.cmd` 起后台+窗口、`stopexit.cmd` 干净停止零残留、`deploy.cmd` 幂等全跳过、`backup.cmd` 菜单与备份引擎正常、四个 `.sh` 语法通过 |
+
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
 ## 2. 目录结构与资产清单
@@ -48,16 +50,20 @@
 <项目根>\
 │
 ├── HANDOVER.md                  # 本文档
-├── 启动DeepSeek-Harness.bat      # 一键启动（托盘应用；双击；启动器窗口数秒后自动关闭不常驻；GBK+CRLF 编码约束见 §8-16）
-├── 停止DeepSeek-Harness.bat      # 一键停止（托盘应用+后台服务；双击；优雅信号+端口兜底）
-├── 部署DeepSeek-Harness.bat      # 一键部署（git 拉取后环境审查与补足：Node/pnpm/git/Ollama 审查、dsh-home/.env 补足、子模块初始化、依赖构建、Electron；幂等可重跑）
-├── deploy-win.bat                # 部署脚本 ASCII 名入口（任何代码页下 call 可解析；中文入口转发到它）
-├── deploy.sh / start.sh / stop.sh  # Linux/macOS 部署/启动/停止（等价 bat 三件套；POSIX 行为未实测）
-├── 备份恢复DeepSeek-Harness.bat + backup-restore.ps1  # 对话存档备份/恢复/更新（PowerShell 内置 Compress-Archive，零依赖；见 §13）
-├── install.bat / install.sh  # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
+├── startrun.cmd / startrun.sh    # 一键启动（托盘应用；Windows 双击 / POSIX ./startrun.sh；启动器窗口数秒后自动关闭不常驻；GBK+CRLF 编码约束见 §8-16）
+├── stopexit.cmd / stopexit.sh    # 一键停止（托盘应用+后台服务；优雅信号+端口兜底）
+├── deploy.cmd / deploy.sh        # 一键部署（git 拉取后环境审查与补足：Node/pnpm/git/Ollama 审查、dsh-home/.env 补足、子模块初始化、依赖构建、Electron；幂等可重跑）
+├── backup.cmd + backup-restore.ps1  # 对话存档备份/恢复/更新（PowerShell 内置 Compress-Archive，零依赖；见 §13）
+├── install.cmd / install.sh      # 自举安装器：单文件下载 → clone（含子模块）→ 自动部署
+│
+│   # 脚本命名：Windows 一律 .cmd、POSIX 一律 .sh，同名成对（startrun / stopexit / deploy / install）。
+│   # 2026-10-24 改名映射：启动DeepSeek-Harness.bat→startrun.cmd、停止DeepSeek-Harness.bat→stopexit.cmd、
+│   #   部署DeepSeek-Harness.bat(+deploy-win.bat 间接层)→deploy.cmd、备份恢复DeepSeek-Harness.bat→backup.cmd、
+│   #   install.bat→install.cmd、start.sh→startrun.sh、stop.sh→stopexit.sh。
+│   #   ASCII 名取代中文名后，deploy-win.bat 那层「中文入口→ASCII 转发」的间接已无必要，故合并删除。
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
-├── deepseek-harness\            # dsh 源码仓库（git master，v0.2.1-rc.2，2026-10-22 升级）
+├── deepseek-harness\            # dsh 源码仓库（git master，v0.2.1-rc.3，2026-10-24 升级）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
 │   ├── apps\web\dist\           # Web 前端构建产物（vite 输出，约 12MB）
 │   ├── packages\*\*\lib\        # 各 TS 包构建产物（tsc/tsdown 输出）
@@ -190,7 +196,7 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 
 ### 启动（日常推荐）
 
-双击 `启动DeepSeek-Harness.bat`（启动器窗口约 4 秒自动关闭）：
+双击 `startrun.cmd`（启动器窗口约 4 秒自动关闭）：
 - **首次启动**：托盘图标立即出现 + 应用窗口自动打开（先显示 loading 页即时反馈，后台就绪后切入真实 UI，约 10-30 秒）；
 - **已在运行**：通过 Electron 单实例锁的 second-instance 事件直接**唤起窗口**（约 2 秒）。
 
@@ -261,14 +267,14 @@ dsh 0.1.2 起 web 模式引入**启动 token 鉴权**，壳需三处配合：
 
 ### 停止
 
-方式一：托盘右键"退出（停止后台服务）"；方式二：双击 `停止DeepSeek-Harness.bat`（写停止标记走优雅路径 + 候选端口监听 PID 兜底清理，幂等）。
+方式一：托盘右键"退出（停止后台服务）"；方式二：双击 `stopexit.cmd`（写停止标记走优雅路径 + 候选端口监听 PID 兜底清理，幂等）。
 
 ### 烟测（无人值守验证）
 
 ```bat
 set DSH_DESKTOP_SMOKE=1
 cd /d <项目根>
-启动DeepSeek-Harness.bat
+startrun.cmd
 ```
 
 启动后自动输出 `smoke.png`（截图）、`smoke.txt`（页面诊断：标题/URL/UA/正文摘要/fetch 与 WS 状态），随后停掉后台并退出（干净状态）。**升级 dsh 后建议先跑一次烟测。**
@@ -291,7 +297,7 @@ cd /d <项目根>
 
 ```bat
 :: —— 启动 ——
-:: 方式零：双击 <项目根>\启动DeepSeek-Harness.bat（推荐日常使用）
+:: 方式零：双击 <项目根>\startrun.cmd（推荐日常使用）
 ::   首次启动：托盘图标 + 窗口自动打开（loading 页即时反馈）；已在运行：约 2 秒唤起窗口
 :: 方式一：桌面壳（npm start；需后台已运行：托盘应用或手动方式二）
 cd /d <项目根>\desktop && npm start
@@ -299,7 +305,7 @@ cd /d <项目根>\desktop && npm start
 cd /d <项目根>\deepseek-harness && pnpm dsh web
 
 :: —— 停止 ——
-:: 方式零：托盘右键"退出（停止后台服务）"，或双击 <项目根>\停止DeepSeek-Harness.bat（优雅信号+端口兜底，幂等）
+:: 方式零：托盘右键"退出（停止后台服务）"，或双击 <项目根>\stopexit.cmd（优雅信号+端口兜底，幂等）
 :: 手工兜底：
 netstat -ano | findstr LISTENING  :: 找到 DSH 端口的 PID（端口见状态栏；候选 3180/2180/4180/6180/8180）
 taskkill /F /PID <pid>            :: 强制停止（Ctrl+C/SIGTERM 为优雅停止，5 秒排空）
@@ -307,7 +313,7 @@ taskkill /F /PID <pid>            :: 强制停止（Ctrl+C/SIGTERM 为优雅停�
 :: WS 就绪探测工具：node dsh-test\probe-ws.cjs（open 或 HTTP_426 视为就绪，同壳逻辑）
 
 :: —— 升级 ——
-:: 先停应用（停止DeepSeek-Harness.bat），再更新子模块到上游最新提交
+:: 先停应用（stopexit.cmd），再更新子模块到上游最新提交
 cd /d <项目根>\deepseek-harness && git fetch origin && git checkout origin/master
 :: 清理旧产物 + 孤儿包目录 + 空组目录：上游 pnpm run clean 目前自身失效（见 §8-32），用等效工具代替
 :: 可先加 --dry-run 只报告不删（核对用）
@@ -357,14 +363,14 @@ node --import "$TSX_URL" \
 13. **迁移 .dsh 时先删 `profiles\node_modules`**（纯符号链接目录，启动时自愈），否则 mv 报错。
 14. **D 盘小文件 IO 较慢**（疑似机械盘）：大量小文件操作（mv/rmdir 十万级文件）可能耗时 10 分钟以上，优先 robocopy /MT:16、git clone、cmd `rmdir /s /q` 等原生工具。
 15. **Web 就绪判据**：curl 200 只代表 webserver 起来；判断浏览器可用还需 WS 握手（0.1.2 起为 `/api/remote.mux`，旧版 `/api/events.mux`，壳已内置此逻辑）。
-16. **启动 bat 必须保持 GBK+CRLF 编码**：中文 Windows 的 cmd 以 GBK 解析批处理，UTF-8 编码会导致含中文的 `if (...)` 块解析错位（行尾被吞、行碎片被当命令执行），`chcp 65001` 也救不了块内中文。**任何编辑（含 AI 工具的增量编辑）后都必须重新转换**：`iconv -f UTF-8 -t CP936` + `unix2dos`，改完用 `iconv -f CP936 -t UTF-8` 回读验证无乱码再交付；切勿直接存成 UTF-8。
-17. **bat 内的外部命令一律写 System32 绝对路径**（`%SystemRoot%\System32\where.exe` 等）：从 Git Bash 等 MSYS 环境调用时，PATH 里的 GNU 工具（where、timeout 等）会劫持同名命令导致参数不兼容。倒计时用 `%SystemRoot%\System32\PING.EXE -n 4 127.0.0.1 >nul`（约 3 秒），不要用 `timeout`（stdin 被重定向时直接报错退出）。
+16. **Windows 入口脚本（现为 `.cmd`，历史为 `.bat`）必须保持 GBK+CRLF 编码**：中文 Windows 的 cmd 以 GBK 解析批处理，UTF-8 编码会导致含中文的 `if (...)` 块解析错位（行尾被吞、行碎片被当命令执行），`chcp 65001` 也救不了块内中文。**任何编辑（含 AI 工具的增量编辑）后都必须重新转换**：`iconv -f UTF-8 -t CP936` + 转 CRLF，改完用 `iconv -f CP936 -t UTF-8` 回读验证无乱码再交付；切勿直接存成 UTF-8。现成工具：`node dsh-test/to-gbk-crlf.js <file...>`（自动转换并回读校验）。`.gitattributes` 已声明 `*.cmd`/`*.bat` 为 `eol=crlf`。
+17. **Windows 脚本（.cmd）内的外部命令一律写 System32 绝对路径**（`%SystemRoot%\System32\where.exe` 等）：从 Git Bash 等 MSYS 环境调用时，PATH 里的 GNU 工具（where、timeout 等）会劫持同名命令导致参数不兼容。倒计时用 `%SystemRoot%\System32\PING.EXE -n 4 127.0.0.1 >nul`（约 3 秒），不要用 `timeout`（stdin 被重定向时直接报错退出）。
 18. **dsh web 冷启动时长随负载波动（实测 10-30 秒）**：健康检查**禁止用固定宽限期**——早期版本用 20 秒宽限，机器慢时依然把启动中的实例误杀成"杀了又起"循环（症状：watchdog.log 反复 `backend unreachable ... restarting`，`[ELIFECYCLE] Command failed with exit code 1` 是被 taskkill 的正常痕迹）。定版方案：**以子进程存活为判据**（进程活着就不杀；死了且端口不通才重启；3 分钟不监听才判卡死），且"任何 HTTP 响应（含 404）即存活"。
 19. **进程树清理双保险**：taskkill `/T` 可能漏杀脱离进程树的孙进程（实际监听 3180 的 dsh 节点），必须再按 `netstat` 监听 PID 兜底一次；停止脚本的"清理残留实例"行即使已清理也可能出现（netstat 行滞后，无害）。mise shim 启动的 node 进程会显示两个（shim 包装 + 真实进程），属正常。
 20. **Electron 的 ELECTRON_RUN_AS_NODE 陷阱**：值为 `1` **或空字符串**都会进入纯 Node 模式（`app` 为 undefined）！cmd 的 `set "VAR="` 传给子进程时行为不稳定（有时剥除、有时传空串），启动脚本必须用 PowerShell `$env:VAR = $null` **彻底删除**该变量（$null 保证子进程环境无此变量）；MSYS bash 的 `VAR= cmd` 会原样传空串，测试时注意。另外 **必须订阅 `window-all-closed`**，否则 Electron 默认关窗即退出、托盘消失。
 21. **退出竞态防护**：应用退出路径（停止信号/托盘菜单/烟测）必须先置 `quitting` 标志再杀后台，否则退出前的最后一个巡检 tick 会把刚杀掉的实例误判为"崩溃"重新拉起，留下孤儿进程。
 22. **模板字符串（反引号）里 `\s` 会被 JS 解析成 `s`**（非法转义丢弃反斜杠）：烟测诊断/注入脚本里的正则 `/\s+/g` 实际变成 `/s+/g`（把所有字母 s 折叠成空格！）。模板字符串内正则须写 `\\s`。**2026-10-03 同类复发**：烟测诊断整段位于外层模板字符串（`executeJavaScript(\`...\`)`）内，我在**注释里写了字面反引号**去说明这件事，结果注释中的反引号直接终止了外层模板 → `SyntaxError: missing ) after argument list`（报错位置在外层模板之后，具有迷惑性）。**规则**：外层模板字符串内（含注释）**禁止出现字面反引号与 `${`**，需要叙述时改写措辞（如"反引号或美元花括号"），拼接字符串也只用 `+`。
-23. **`NoDefaultCurrentDirectoryInExePath=1` 环境变量**（本机存在）：cmd **不搜索当前目录**，bat 内相对名 `call`/执行一律失败（"不是内部或外部命令"）。所有 bat 内跨目录调用必须用绝对路径（`%~dp0` 推导 + `SEP` 变量拼接）。
+23. **`NoDefaultCurrentDirectoryInExePath=1` 环境变量**（本机存在）：cmd **不搜索当前目录**，脚本内相对名 `call`/执行一律失败（"不是内部或外部命令"）。所有跨目录调用必须用绝对路径（`%~dp0` 推导 + `SEP` 变量拼接）。**2026-10-24 起入口脚本改为 ASCII 名（`startrun.cmd`/`stopexit.cmd`/`deploy.cmd`/`install.cmd`/`backup.cmd`），中文文件名导致的 `call` 解析问题随之消失**，原先为绕开该限制而设的 `deploy-win.bat` 间接层也已合并删除。
 24. **submodule 下 dsh 的 lefthook postinstall 失败**（`extensions.worktreeConfig` 冲突，仅影响开发 hooks）：`pnpm install` 会因此报错。部署脚本已宽容处理（依赖已装则继续），且 `pnpm run build` 需加 `--config.verifyDepsBeforeRun=false`（install 部分失败后 pnpm 会拒绝 build）。
 25. **MSYS→node.exe 传参吃反斜杠**：`node -e "含 \ 的字符串"` 经 bash 传参后反斜杠被吞（曾把 `\n` 变成换行、路径分隔符丢失）。需含反斜杠的字符串操作时，用 Write 写 patch.js 文件执行（不经命令行参数）。
 26. **官方 CLI 硬拒 `--host 0.0.0.0`**（rc.7 实测）：报错 "intentionally not supported yet for safety: it would expose remote code execution to the network"；`--host 具体局域网 IP` 也会在 profile 加载阶段失败。局域网访问只能走壳内转发层（见 §6）。
@@ -431,7 +437,7 @@ node --import "$TSX_URL" \
 
 **界面内操作（推荐）**：托盘应用窗口第二排功能按钮区 —— `💾 备份` / `📤 迁移`（工作区搬移，非备份合并）/ `🔄 备份更新` / `📥 恢复`，均弹原生图形化文件对话框选路径，完成弹结果框。
 
-**独立菜单 bat**（`备份恢复DeepSeek-Harness.bat`，PowerShell 内置压缩，零依赖）：
+**独立菜单脚本**（`backup.cmd`，PowerShell 内置压缩，零依赖）：
 
 | 操作 | 行为 |
 |---|---|
@@ -440,7 +446,7 @@ node --import "$TSX_URL" \
 | 更新 | 将当前对话存档**合并进既有备份 zip**（`Compress-Archive -Update`）——迁移场景：备份 → 迁移后改工作区 → 更新同一 zip 增量累积 |
 
 - 命令行直用（自动化）：`powershell -NoProfile -ExecutionPolicy Bypass -File backup-restore.ps1 -Action backup|update|restore -ZipPath <路径>`（带 `-ZipPath` 跳过对话框）。
-- 技术要点：`backup-restore.ps1` 为 UTF-8 BOM 编码（PowerShell 5.1/7 均正确识别）；bat 为 GBK+CRLF（同 §8-16 约束）；文件对话框来自 `System.Windows.Forms`（Windows 内置）。
+- 技术要点：`backup-restore.ps1` 为 UTF-8 BOM 编码（PowerShell 5.1/7 均正确识别）；`backup.cmd` 为 GBK+CRLF（同 §8-16 约束）；文件对话框来自 `System.Windows.Forms`（Windows 内置）。
 - 建议备份前先停止托盘应用（避免会话写入中的不一致），非强制。
 
 ## 14. 跨平台与安卓化评估（2026-08-18）
@@ -448,7 +454,7 @@ node --import "$TSX_URL" \
 ### Linux / macOS 支持（已代码化，仅 Windows 实测）
 
 - `main.cjs` 平台适配层（`IS_WIN` 分支）：进程终止（Windows taskkill / POSIX `process.kill`+SIGTERM）、端口探测（netstat / `lsof`）、dsh spawn（`cmd /c pnpm` / 直接 spawn + detached 进程组）、AUMID 仅 Windows；
-- 脚本：`start.sh` / `stop.sh` / `deploy.sh`（等价 bat 三件套，语法已校验；**POSIX 行为未实测，需在 Linux/macOS 上验证**）；
+- 脚本：`startrun.sh` / `stopexit.sh` / `deploy.sh`（等价 bat 三件套，语法已校验；**POSIX 行为未实测，需在 Linux/macOS 上验证**）；
 - 备份/恢复工具（PowerShell ps1）为 Windows 专属；POSIX 平台界面按钮会提示用系统 zip/tar 手动备份。
 
 ### 安卓化评估（结论：不建议原生安卓化，推荐远程访问）

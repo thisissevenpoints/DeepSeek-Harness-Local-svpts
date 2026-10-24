@@ -976,7 +976,7 @@ const ERROR_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Deep
 code{background:#1f2937;padding:2px 6px;border-radius:4px;font-size:12px}</style></head>
 <body><div class="box"><h2>后台服务启动失败</h2>
 <p>90 秒内未就绪。请查看 <code>desktop\\watchdog.log</code> 与 <code>desktop\\dsh-web.log</code>。</p>
-<p>可双击 <code>停止DeepSeek-Harness.bat</code> 清理后，再双击 <code>启动DeepSeek-Harness.bat</code> 重试。</p></div></body></html>`
+<p>可双击 <code>stopexit.cmd</code> 清理后，再双击 <code>startrun.cmd</code> 重试。</p></div></body></html>`
 
 async function bootWindowInto(w) {
   const up = await waitFor(isWebUp, 90000)

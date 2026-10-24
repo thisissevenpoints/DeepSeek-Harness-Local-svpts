@@ -7,8 +7,9 @@ rem  双击即可使用；本启动器窗口几秒后自动关闭，不常驻。
 rem  首次启动：托盘图标出现 + 应用窗口自动打开（loading 页即时反馈）。
 rem  应用已在运行：直接唤起应用窗口（秒开）。
 rem  关闭窗口 = 回到托盘，后台继续运行；
-rem  彻底停止：托盘右键"退出（停止后台服务）"或双击 停止DeepSeek-Harness.bat。
+rem  彻底停止：托盘右键"退出（停止后台服务）"或双击 stopexit.cmd。
 rem  日志：desktop\watchdog.log、desktop\shell.log、desktop\dsh-web.log
+rem  跨平台对应：Linux/macOS 用 ./startrun.sh
 rem ============================================================
 
 rem 0) 项目根 = 本脚本所在目录（可任意位置部署）
@@ -31,8 +32,7 @@ if errorlevel 1 (
     exit /b 1
 )
 if not exist "%ROOT%desktop\node_modules\electron\dist\electron.exe" (
-    echo [错误] 未找到 Electron。请先安装桌面壳依赖：
-    echo        cd /d "%ROOT%desktop" ^&^& npm install
+    echo [错误] 未找到 Electron。请先运行部署脚本 deploy.cmd。
     pause
     exit /b 1
 )

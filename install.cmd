@@ -6,6 +6,7 @@ rem  DeepSeek Harness Local svpts 自举安装器（Windows）
 rem  单个文件即可完成：下载本文件到任意目录 → 运行 → 自动
 rem  clone 仓库（含子模块）→ 自动部署（依赖+构建）→ 即可使用。
 rem  无需手动下载任何二进制安装包（仓库内不含不可审查的二进制）。
+rem  跨平台对应：Linux/macOS 用 ./install.sh
 rem ============================================================
 
 set "REPO_URL=https://github.com/thisissevenpoints/DeepSeek-Harness-Local-svpts.git"
@@ -69,7 +70,7 @@ echo [v] 仓库已就位
 rem 4) 自动部署（环境审查与补足）
 echo [2/2] 运行部署脚本（依赖安装 + 构建，约 3-10 分钟）……
 cd /d "%TARGET_ABS%"
-call "%TARGET_ABS%%SEP%deploy-win.bat"
+call "%TARGET_ABS%%SEP%deploy.cmd"
 if errorlevel 1 (
     echo [x] 部署失败，请查看上方提示。
     goto :FAIL
@@ -77,7 +78,8 @@ if errorlevel 1 (
 
 echo ==========================================
 echo   安装完成！
-echo   启动：双击 %TARGET_ABS%%SEP%启动DeepSeek-Harness.bat
+echo   启动：双击 %TARGET_ABS%%SEP%startrun.cmd
+echo   停止：双击 %TARGET_ABS%%SEP%stopexit.cmd
 echo   说明：README.md（使用）、HANDOVER.md（运维）
 echo ==========================================
 %SystemRoot%\System32\PING.EXE -n 6 127.0.0.1 >nul

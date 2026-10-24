@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DeepSeek Harness Local svpts — Linux/macOS 停止脚本（等价 Windows 的 停止DeepSeek-Harness.bat）
+# DeepSeek Harness Local svpts — Linux/macOS 停止脚本（等价 Windows 的 stopexit.cmd）
 # 优雅路径：写停止信号 → 应用自清理退出；兜底：按端口清理
 set -u
 cd "$(dirname "$0")"

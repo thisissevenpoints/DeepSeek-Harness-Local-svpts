@@ -90,6 +90,7 @@ cd "$TARGET_DIR"
 
 echo "=========================================="
 echo "  安装完成！"
-echo "  启动：$TARGET_DIR/start.sh"
+echo "  启动：$TARGET_DIR/startrun.sh"
+echo "  停止：$TARGET_DIR/stopexit.sh"
 echo "  说明：README.md（使用）、HANDOVER.md（运维）"
 echo "=========================================="

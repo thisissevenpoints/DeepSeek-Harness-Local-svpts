@@ -152,7 +152,7 @@ cd <你的工作目录> && TSX_TSCONFIG_PATH="<项目根>/deepseek-harness/tscon
 
 ## 9. Electron 托盘应用（2026-08-16 新增，08-17 定版）
 
-- 位置：`<项目根>\desktop\`，日常入口：双击 `<项目根>\启动DeepSeek-Harness.bat`（启动器数秒后自动关闭）；停止：托盘右键"退出（停止后台服务）"或双击停止脚本。
+- 位置：`<项目根>\desktop\`，日常入口：双击 `<项目根>\startrun.cmd`（启动器数秒后自动关闭）；停止：托盘右键"退出（停止后台服务）"或双击停止脚本。
 - 架构：`main.cjs` 为**单一常驻托盘 Electron 应用**（看门狗 + 桌面壳合一）——后台 dsh 服务唯一 owner（健康巡检 5s、子进程存活判据防误杀慢启动、崩溃自动重启、`watchdog.stop` 文件信号停止、`watchdog.pid` 兜底）+ 窗口（loading 页即时反馈 → 就绪后真实 UI）。关窗回托盘后台续跑；再双击启动约 2 秒唤起窗口。
 - 附加能力：界面右上角 ⏻ **完全退出按钮**（壳注入，不改 DSH 本体；确认后停前后端）；窗口/任务栏图标与托盘同源（app.ico）；`ELECTRON_RUN_AS_NODE` 自愈（bat 内 `$env:VAR=$null` 彻底删除）。
 - 烟测：`set DSH_DESKTOP_SMOKE=1` 后双击启动脚本 → 自动截图 smoke.png、输出页面诊断 smoke.txt（含 quitBtn 字段）→ 停后台退出。升级 dsh 后建议必跑。
