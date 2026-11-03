@@ -42,6 +42,10 @@
 
 | 2026-10-24 | 升级 dsh 至 **v0.2.1-rc.3**（687f282e8625→22ddee379240，1539 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`+几何 `overlap:false`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过。**同时把入口脚本改为多端统一命名**（`startrun`/`stopexit`/`deploy`/`install`/`backup` + `.cmd`/`.sh`），中文文件名与 `deploy-win.bat` 间接层一并取消；E2E 实测 `startrun.cmd` 起后台+窗口、`stopexit.cmd` 干净停止零残留、`deploy.cmd` 幂等全跳过、`backup.cmd` 菜单与备份引擎正常、四个 `.sh` 语法通过 |
 
+| 2026-11-01 | 升级 dsh 至 **v0.2.2-alpha.2**（22ddee379240→ce7073d51254，988 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`+几何 `overlap:false`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过；上游 gate 10/10 通过。清理 1 个孤儿包（`packages/client/ui-deepseek-model-label-1017`，上游移除）。同时记录踩坑 #33（本机 `wmic` 已移除，进程清理须改用 PowerShell `Get-CimInstance`） |
+
+| 2026-11-03 | 升级 dsh 至 **v0.2.2-alpha.3**（ce7073d51254→8bd073392eef，666 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`+几何 `overlap:false`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过；上游 gate 10/10 通过。清理 6 个孤儿包（`experimental/agent-team*`、`experimental/client-ui-agent-team`、`experimental/tool-agent-team`、`web/web-search-exa`、`web/web-search-perplexity`，上游本轮移除）。测试流程已按 §8-33 改用 PowerShell 清理残留实例 + curl 轮询端口，未再出现假失败 |
+
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
 ## 2. 目录结构与资产清单
@@ -63,7 +67,7 @@
 │   #   ASCII 名取代中文名后，deploy-win.bat 那层「中文入口→ASCII 转发」的间接已无必要，故合并删除。
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
-├── deepseek-harness\            # dsh 源码仓库（git master，v0.2.1-rc.3，2026-10-24 升级）
+├── deepseek-harness\            # dsh 源码仓库（git master，v0.2.2-alpha.3，2026-11-03 升级）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
 │   ├── apps\web\dist\           # Web 前端构建产物（vite 输出，约 12MB）
 │   ├── packages\*\*\lib\        # 各 TS 包构建产物（tsc/tsdown 输出）
@@ -310,6 +314,8 @@ cd /d <项目根>\deepseek-harness && pnpm dsh web
 netstat -ano | findstr LISTENING  :: 找到 DSH 端口的 PID（端口见状态栏；候选 3180/2180/4180/6180/8180）
 taskkill /F /PID <pid>            :: 强制停止（Ctrl+C/SIGTERM 为优雅停止，5 秒排空）
 :: 注意：taskkill 不带 /F 对 node 控制台进程无效（报"只能强制终止"）；脚本化场景一律 /F + 干净重启
+:: 清理本项目 Electron 实例（本机 wmic 已移除，见 §8-33）：
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='electron.exe'\" | Where-Object { $_.ExecutablePath -like '*DeepSeek-Harness-Local*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
 :: WS 就绪探测工具：node dsh-test\probe-ws.cjs（open 或 HTTP_426 视为就绪，同壳逻辑）
 
 :: —— 升级 ——
@@ -385,6 +391,19 @@ node --import "$TSX_URL" \
     3. **空组目录**：删组内包全部迁走后留下的空壳（0.2.1 的 `code-runtime`/`e2b`/`examples`）。
 
     加 `--dry-run` 只报告不删除（升级前后核对、回归验证用）。**该自动化是必要的**：上游重排包结构很频繁（0.1.7 起连续三个版本每版都有），手工探测每次都要重来一遍。
+33. **本机已移除 `wmic`（Windows 11 26300），清理脚本勿再用它**（2026-11-01 实测）：`wmic process where ... get ExecutablePath` 直接报 `command not found`。任何靠 `wmic` 按可执行文件路径筛进程的写法会**静默失效**（管道无输出 → 条件不成立 → 该杀的没杀），表现为测试时旧 Electron 实例不断累积、残留 dsh 占住端口，新实例于是走「attach 外部实例」路径并用过期的 token 鉴权，最终 `waitWebUp` 超时、测试钩子根本不执行，很容易被误判成产品回归。**正确写法**：
+    ```powershell
+    Get-CimInstance Win32_Process -Filter "Name='electron.exe'" |
+      Where-Object { $_.ExecutablePath -like '*DeepSeek-Harness-Local*' } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    ```
+    产品侧不受影响：`stopexit.cmd` 用的是 `watchdog.pid` + `netstat`/`taskkill`，不依赖 `wmic`。**测试前务必确认已无残留实例**（`tasklist | grep -ci electron` 应为 0，候选端口无 LISTENING）。
+    **同一轮还发现 `netstat` 会漏报异常态的监听套接字**：一个半死的 dsh 仍能响应 HTTP（curl 得 401）且 PowerShell 显示 3180 有多条 `Established` + 一条无法映射的状态（枚举值 0），但 `netstat -ano` 里**完全没有 3180 的 LISTENING 行** —— 于是按 netstat 判断会得出"端口空闲/无监听"的错误结论，而按端口兜底清理也会漏掉该进程。**排查端口占用优先用**：
+    ```powershell
+    Get-NetTCPConnection -LocalPort 3180 -ErrorAction SilentlyContinue |
+      Select-Object State,OwningProcess -Unique
+    ```
+    （`State` 分组可能因枚举值异常报错，但 `OwningProcess` 仍可用于 `Stop-Process`。）
 
 ## 9. 数据与日志位置
 
