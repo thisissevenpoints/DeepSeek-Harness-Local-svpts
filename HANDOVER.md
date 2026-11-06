@@ -46,6 +46,8 @@
 
 | 2026-11-03 | 升级 dsh 至 **v0.2.2-alpha.3**（ce7073d51254→8bd073392eef，666 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`+几何 `overlap:false`、重启闭环 `webUp=true`、LAN `HTTP 200`+`LAN-WS-OPEN` 全通过；上游 gate 10/10 通过。清理 6 个孤儿包（`experimental/agent-team*`、`experimental/client-ui-agent-team`、`experimental/tool-agent-team`、`web/web-search-exa`、`web/web-search-perplexity`，上游本轮移除）。测试流程已按 §8-33 改用 PowerShell 清理残留实例 + curl 轮询端口，未再出现假失败 |
 
+| 2026-11-06 | 升级 dsh 至 **v0.2.2-rc.1**（8bd073392eef→fcc0ad462172，260 提交）；壳侧适配逻辑无需变更。烟测 `ws=OPEN`+几何 `overlap:false`、重启闭环 `webUp=true` 通过。**LAN 测试暴露真实缺陷并已修复**：Windows 保留段漂移为 `3252-3351` 覆盖原固定转发端口 3280 → `listen EACCES`、局域网功能静默失效；改为**转发端口候选回退**（`3280/4280/5280/6280/7280/8280/10280`，逐个真实 listen，全失败弹错误框），实测落到 5280、`HTTP 200`+`LAN-WS-OPEN`、状态栏显示「局域网 开 5280」；见 §8-6 / §6 |
+
 **当前状态**：所有 dsh/壳进程均已停止（干净的关机状态），Ollama 常驻服务在线。2026-08-16 深夜全量回归全部通过（见 §11）。环境随时可启动使用。
 
 ## 2. 目录结构与资产清单
@@ -67,7 +69,7 @@
 │   #   ASCII 名取代中文名后，deploy-win.bat 那层「中文入口→ASCII 转发」的间接已无必要，故合并删除。
 ├── references\          # 设计参考项目（本地拉取；**已加入 .gitignore，永不入库**）
 │
-├── deepseek-harness\            # dsh 源码仓库（git master，v0.2.2-alpha.3，2026-11-03 升级）
+├── deepseek-harness\            # dsh 源码仓库（git master，v0.2.2-rc.1，2026-11-06 升级）
 │   ├── apps\cli\src\bin.ts      # dsh CLI 入口（源模式经 tsx 运行）
 │   ├── apps\web\dist\           # Web 前端构建产物（vite 输出，约 12MB）
 │   ├── packages\*\*\lib\        # 各 TS 包构建产物（tsc/tsdown 输出）
@@ -228,7 +230,7 @@ OLLAMA_PLACEHOLDER_KEY=ollama
 - 通知机制：**console 标记分派**（页面 `console.log('DSH_DESKTOP_*')` → 壳 `console-message` 必然送达，主通道）+ 自定义协议导航兜底（仅退出按钮保留双通道、带去重）。
 - **弹层避让**（2026-08-19）：dsh 前端弹层类名为 CSS-in-JS 生成（如 `YngKKa_overlay`），注入通用规则 `[class*="_overlay"]{top:var(--dsh-overlay-h)}`（--dsh-overlay-h = 两栏实际高度），设置等弹窗不再被顶栏/功能栏压住；
 - **底部状态栏**（2026-08-19）：`● 后端在线/离线`（页面内每 5 秒 fetch 探测）+ `端口 <选定端口>`（启动时实测选定，见下节）+ `工作区 <路径>`（JSON.stringify 传值，路径经 `.st-home` textContent 赋值）+ `局域网 开/关`（主进程推送）+ `本机 <局域网 IP>`（主进程 os.networkInterfaces 获取，优先 192.168/10/172.16-31 段）+ `v0.1.0`；body padding-bottom 让位（29px）；
-- **局域网转发 + 确认鉴权**（2026-08-19，不修改 harness）：功能按钮区 `🌐 局域网` 开关 → 主进程起 `0.0.0.0:3280` 反向代理（HTTP + WebSocket 双转发）到 `127.0.0.1:<选定端口>`。**默认关闭**；开启后局域网设备访问先见"申请页"（大按钮）→ 电脑端弹确认框 → 授权后下发持久 Cookie（`desktop\lan-auth.json` 记录设备，**已 gitignore**）→ 局域网状态不变则确权不失效；删除该文件即一键撤销。官方 CLI 硬性拒绝 `--host 0.0.0.0`（RCE 风险声明），此方案绕开且保持"人类确认"安全边界；
+- **局域网转发 + 确认鉴权**（2026-08-19，不修改 harness）：功能按钮区 `🌐 局域网` 开关 → 主进程起 `0.0.0.0:<选定转发端口>` 反向代理（HTTP + WebSocket 双转发）到 `127.0.0.1:<选定 DSH 端口>`。**转发端口自 2026-11-06 起自动选定**（候选 `3280/4280/5280/6280/7280/8280/10280`，逐个真实 listen、跳过保留段与占用，全失败则弹错误框；实际端口显示在开启提示与状态栏「局域网 开 <端口>」）——起因是 Windows 保留段漂移为 `3252-3351` 把原固定端口 3280 圈住，导致 `listen EACCES`、局域网功能整体静默失效（见 §8-6）。**默认关闭**；开启后局域网设备访问先见"申请页"（大按钮）→ 电脑端弹确认框 → 授权后下发持久 Cookie（`desktop\lan-auth.json` 记录设备，**已 gitignore**）→ 局域网状态不变则确权不失效；删除该文件即一键撤销。官方 CLI 硬性拒绝 `--host 0.0.0.0`（RCE 风险声明），此方案绕开且保持"人类确认"安全边界；
 - 页面每次加载（含自动重载循环）后自动重新注入；loading/错误页（data:）不注入；
 4. 冒烟诊断含 `titlebarBtns` / `titlebarOrder` 字段（5 按钮注入与顺序：restart,quit,minimize,maximize,close-window）。
 
@@ -360,6 +362,7 @@ node --import "$TSX_URL" \
 4. **pnpm 仓库跨盘 mv 会失败/极慢**：workspace 大量包级符号链接无法跨盘重建。正确迁移姿势：删 node_modules → 全新 clone（或 robocopy /MT:16）→ 新位置 `pnpm install && pnpm run build`。
 5. **会话日志为 zstd 多帧容器**：`node:zlib` 的 `zstdDecompressSync` 只解第一帧；需按 magic `28 B5 2F FD`（0x28B52FFD）扫描逐帧解码。
 6. **Windows 动态保留段会 EACCES，且会漂移（已改为自动选端口）**：`netsh interface ipv4 show excludedportrange protocol=tcp` 查看保留段。**该段由系统动态预留（Hyper-V/WSL 等预约），随重启与服务变化改变**：2026-08-17 实测 `2993-3092` 覆盖原 3080（当时用 `--port 3180` 迁移解决）；**2026-09-16 保留段漂移为 `3171-3270`，又把 3180 圈进去**，表现为 dsh 反复 `listen EACCES` 启动失败、看门狗连试 4 次后进入"放弃自动重启"（后端一直起不来）。**2026-09-18 再次漂移为 `14218-14317`，3180 又恢复可用**（壳自动选回 3180，无需人工干预）。保留段的反复漂移正说明"固定端口"不可靠。**定版方案：壳启动时按候选表实测绑定**（`WEB_PORT_CANDIDATES = [3180, 2180, 4180, 6180, 8180]`，见 §6），自动跳过保留段与非 HTTP 占用；运行期端口若变保留段也会自动重选并重启后台。启停脚本的端口兜底清理同步遍历该候选表。临时服务器用 `listen(0)` 动态端口。
+    **2026-11-06 同一问题波及局域网转发端口**：保留段漂移为 `3252-3351`，把**原固定转发端口 3280** 圈住 → `LAN proxy error: listen EACCES`，局域网功能整体静默失效（界面上只是"点了没反应"，日志里才有 EACCES）。据此给转发端口也加了候选回退（`LAN_PORT_CANDIDATES = [3280, 4280, 5280, 6280, 7280, 8280, 10280]`，逐个**真实 listen** 而非先探测后监听，避免竞态；全失败弹错误框），实测两次 EACCES 后落到 **5280**，HTTP 与 WS 转发均正常、状态栏显示「局域网 开 5280」。**教训**：凡绑定固定端口的组件都要按同一模式做候选回退，不能只修当前报错的那一个。
 7. **MSYS 的 TaskStop/普通 kill 杀不掉 node/mv 子进程**：按 PID 找进程树（`netstat -ano | findstr :3180`）→ `taskkill //F //PID`（Git Bash 双斜杠）。
 8. **本机会话环境设置了 `ELECTRON_RUN_AS_NODE=1`**（来自 CherryStudio 进程环境继承，非注册表/非 .bashrc）：跑任何 Electron 应用前必须 `unset ELECTRON_RUN_AS_NODE`（或在 cmd 里 `set ELECTRON_RUN_AS_NODE=`），否则 Electron 以纯 Node 运行（`require('electron')` 返回 exe 路径字符串，`app` 为 undefined）。**桌面壳的 `npm start` 已内置自愈（2026-08-16 修复，见 §6-2b），污染环境下可正常启动**；`DSH_HOME` 在 CherryStudio 启动前设置，其派生 shell 可能看不到——重启 CherryStudio 或手动 `export` 即可。2026-08-20 补修：防御分支原先引用尚未 require 的 `fs`，导致错误日志静默丢失（进程直接退出码 1），现已改为分支内 `require('node:fs')`，保证日志必写。
 9. **Electron 37 API 变更**：`BrowserWindow.setWindowOpenHandler` 已移除 → 用 `win.webContents.setWindowOpenHandler`。

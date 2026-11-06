@@ -100,14 +100,15 @@ function pidAlive(pid) {
 }
 
 // 绑定实测端口状态：'free' 可用 | 'busy' 已有监听者 | 'reserved' Windows 保留段（EACCES）
-function probeBind(port) {
+// host 可指定：本机探测用 127.0.0.1，局域网转发端口须用 0.0.0.0（与真实监听地址一致才有意义）
+function probeBind(port, host = '127.0.0.1') {
   return new Promise((resolve) => {
     const srv = net.createServer()
     srv.once('error', (e) => {
       resolve(e && e.code === 'EADDRINUSE' ? 'busy' : 'reserved')
     })
     srv.once('listening', () => srv.close(() => resolve('free')))
-    srv.listen(port, '127.0.0.1')
+    srv.listen(port, host)
   })
 }
 
@@ -483,7 +484,7 @@ const OVERLAY_INJECT = `(() => {
   toolbar.appendChild(mkTool('dsh-desktop-migrate', '工作区迁移：选择新位置并把整个工作区（dsh-home）搬过去', '<span style="font-size:14px">\\uD83D\\uDCE4</span> 迁移'))
   toolbar.appendChild(mkTool('dsh-desktop-update', '备份更新：将当前对话存档合并进既有备份 zip', '<span style="font-size:14px">\\uD83D\\uDD04</span> 备份更新'))
   toolbar.appendChild(mkTool('dsh-desktop-restore', '从备份 zip 还原对话存档（当前会话自动留底可回退）', '<span style="font-size:14px">\\uD83D\\uDCE5</span> 恢复'))
-  toolbar.appendChild(mkTool('dsh-desktop-lan-toggle', '局域网转发开关：局域网设备经确认后可访问本机（3280→本机 DSH 端口）', '<span style="font-size:14px">\\uD83C\\uDF10</span> 局域网'))
+  toolbar.appendChild(mkTool('dsh-desktop-lan-toggle', '局域网转发开关：局域网设备经确认后可访问本机（端口自动选定，开启后见提示与状态栏）', '<span style="font-size:14px">\\uD83C\\uDF10</span> 局域网'))
   overlay.appendChild(toolbar)
   document.body.appendChild(overlay)
   // 底部状态栏：后端在线状态（页面内轮询）/ 端口 / 工作区路径 / 版本
@@ -512,10 +513,12 @@ const OVERLAY_INJECT = `(() => {
   statusbar.appendChild(ipSpan)
   statusbar.appendChild(mkSpan('v__APP_VERSION__'))
   document.body.appendChild(statusbar)
-  // 主进程推送局域网状态（toggle 后调用）
-  window.dshUpdateLan = (state) => {
+  // 主进程推送局域网状态（toggle 后调用）；port 为实际监听端口（候选表中可能不是 3280）
+  window.dshUpdateLan = (state, port) => {
     const el = document.querySelector('#dsh-desktop-statusbar .st-lan')
-    if (el) { el.textContent = state === 'on' ? '开' : '关'; el.style.color = state === 'on' ? '#22c55e' : '#9ca3af' }
+    if (!el) return
+    el.textContent = state === 'on' ? ('开' + (port ? ' ' + port : '')) : '关'
+    el.style.color = state === 'on' ? '#22c55e' : '#9ca3af'
   }
   const checkBackend = async () => {
     const ok = await fetch('http://127.0.0.1:__WEB_PORT__').then(() => true).catch(() => false)
@@ -754,10 +757,13 @@ async function migrateWorkspace() {
   }
 }
 
-// —— 局域网转发 + 确认鉴权（不修改 harness；0.0.0.0:3280 → 127.0.0.1:<选定的 DSH 端口>）——
+// —— 局域网转发 + 确认鉴权（不修改 harness；0.0.0.0:<选定端口> → 127.0.0.1:<选定的 DSH 端口>）——
 // 设计：默认关闭；开启后局域网设备访问转发端口先见"申请页"→ 电脑端弹确认 → 授权
 // 后下发持久 Cookie（lan-auth.json 记录），局域网状态不变则确权不失效。可一键撤销。
-const LAN_PORT = 3280
+// 端口：与 DSH 端口同理，Windows 动态保留段会漂移（2026-11-06 实测 3252-3351 覆盖了原固定端口 3280，
+// 导致 listen EACCES、局域网功能整体失效）。故按候选表实测绑定，实际端口在开启时提示并显示于状态栏。
+const LAN_PORT_CANDIDATES = [3280, 4280, 5280, 6280, 7280, 8280, 10280]
+let lanPort = LAN_PORT_CANDIDATES[0]
 const LAN_COOKIE = 'dsh_lan_auth'
 const LAN_AUTH_FILE = path.join(DIR, 'lan-auth.json')
 let lanServer = null
@@ -865,49 +871,84 @@ async function lanHandleApply(req, res) {
   } catch { /* ignore */ }
 }
 
-function startLanProxy() {
-  if (lanServer) return
-  lanServer = http.createServer((req, res) => {
+// 新建一个带完整请求/升级处理的转发服务器（每次尝试端口都用全新实例，避免半开状态残留）
+function createLanServer() {
+  const srv = http.createServer((req, res) => {
     if (lanAuthorized(req)) { proxyHttp(req, res); return }
     if (req.url === '/__lan_apply' && req.method === 'POST') { lanHandleApply(req, res); return }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     res.end(LAN_APPLY_PAGE)
   })
-  lanServer.on('upgrade', (req, socket, head) => {
+  srv.on('upgrade', (req, socket, head) => {
     if (lanAuthorized(req)) proxyUpgrade(req, socket, head)
     else { try { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy() } catch { /* ignore */ } }
   })
-  lanServer.on('error', (e) => wlog(`LAN proxy error: ${e && e.message || e}`))
-  lanServer.listen(LAN_PORT, '0.0.0.0', () => {
-    wlog(`LAN proxy listening on 0.0.0.0:${LAN_PORT} (→ ${WEB_URL})`)
-    pushLanStatus(true)
+  return srv
+}
+
+// 在指定端口上真正 listen（不先探测），失败返回 false —— 避免"探测可用但 listen 失败"的竞态
+function listenLanServer(srv, port) {
+  return new Promise((resolve) => {
+    const onError = (e) => { srv.removeListener('listening', onListening); wlog(`LAN port ${port} unavailable: ${e && e.code || e}`); resolve(false) }
+    const onListening = () => { srv.removeListener('error', onError); resolve(true) }
+    srv.once('error', onError)
+    srv.once('listening', onListening)
+    srv.listen(port, '0.0.0.0')
   })
+}
+
+// 依次尝试候选端口，成功即返回实际端口；全失败返回 null
+async function startLanProxy() {
+  if (lanServer) return lanPort
+  for (const port of LAN_PORT_CANDIDATES) {
+    const srv = createLanServer()
+    if (await listenLanServer(srv, port)) {
+      lanServer = srv
+      lanPort = port
+      srv.on('error', (e) => wlog(`LAN proxy error: ${e && e.message || e}`))
+      wlog(`LAN proxy listening on 0.0.0.0:${port} (→ ${WEB_URL})`)
+      pushLanStatus(true)
+      return port
+    }
+  }
+  wlog('LAN proxy failed: no bindable candidate port')
+  return null
 }
 
 function pushLanStatus(on) {
   if (!win || win.isDestroyed()) return
   win.webContents.executeJavaScript(
-    `window.dshUpdateLan && window.dshUpdateLan(${on ? "'on'" : "'off'"})`,
+    `window.dshUpdateLan && window.dshUpdateLan(${on ? "'on'" : "'off'"}, ${on ? lanPort : 'null'})`,
   ).catch(() => { /* 页面未就绪时忽略 */ })
 }
 
-function toggleLanProxy() {
+async function toggleLanProxy() {
   if (lanServer) {
     try { lanServer.close() } catch { /* ignore */ }
     lanServer = null
     wlog('LAN proxy stopped')
     pushLanStatus(false)
-  } else {
-    startLanProxy()
-    // 防火墙提示（开启时提醒；管理员权限下 netsh 可自动放行，此处仅提示）
-    const { shell } = require('electron')
-    dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
-      type: 'info',
-      title: '局域网转发已开启',
-      message: `已监听 0.0.0.0:${LAN_PORT}（转发到本机 dsh）`,
-      detail: '手机/其他设备访问 http://<本机局域网IP>:3280 会先看到申请页，电脑端确认后即可使用。\n如设备无法连接，请在防火墙放行 TCP 3280 入站。',
-    }).catch(() => { /* ignore */ })
+    return
   }
+  const port = await startLanProxy()
+  const parent = win && !win.isDestroyed() ? win : undefined
+  if (port === null) {
+    // 全部候选端口不可用（被保留段圈住 / 被占用）——明确报错，避免"点了没反应"
+    dialog.showMessageBox(parent, {
+      type: 'error',
+      title: '局域网转发开启失败',
+      message: '没有可用端口',
+      detail: `已尝试 ${LAN_PORT_CANDIDATES.join(' / ')}，均被系统保留段或其它程序占用。\n可运行 netsh interface ipv4 show excludedportrange protocol=tcp 查看保留段。`,
+    }).catch(() => { /* ignore */ })
+    return
+  }
+  // 防火墙提示（开启时提醒；管理员权限下 netsh 可自动放行，此处仅提示）
+  dialog.showMessageBox(parent, {
+    type: 'info',
+    title: '局域网转发已开启',
+    message: `已监听 0.0.0.0:${port}（转发到本机 dsh）`,
+    detail: `手机/其他设备访问 http://<本机局域网IP>:${port} 会先看到申请页，电脑端确认后即可使用。\n如设备无法连接，请在防火墙放行 TCP ${port} 入站。`,
+  }).catch(() => { /* ignore */ })
 }
 
 function dispatchUiMessage(marker) {
@@ -947,7 +988,7 @@ function dispatchUiMessage(marker) {
       handleBackupAction('restore')
       break
     case CONSOLE_MARKERS.LAN_TOGGLE:
-      toggleLanProxy()
+      toggleLanProxy().catch((e) => wlog(`LAN toggle error: ${e && e.message || e}`))
       break
   }
 }
@@ -1126,7 +1167,15 @@ async function openShellWindow() {
     await new Promise(r => setTimeout(r, 3000))
     slog('autoclicklan: clicking LAN toggle')
     await win.webContents.executeJavaScript(`document.getElementById('dsh-desktop-lan-toggle')?.click()`)
-    await new Promise(r => setTimeout(r, 45000))
+    await new Promise(r => setTimeout(r, 10000))
+    // 校验状态栏是否反映实际端口（端口可能因 Windows 保留段而落在候选表中段）
+    try {
+      const shown = await win.webContents.executeJavaScript(
+        `document.querySelector('#dsh-desktop-statusbar .st-lan')?.textContent || '(missing)'`,
+      )
+      slog(`autoclicklan: statusbar LAN = ${shown}`)
+    } catch { /* 尽力而为 */ }
+    await new Promise(r => setTimeout(r, 35000))
     slog('autoclicklan done, quitting')
     quitting = true
     app.quit()
